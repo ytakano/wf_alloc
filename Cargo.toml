@@ -1,0 +1,32 @@
+[package]
+name = "wf_alloc"
+version = "0.1.0"
+edition = "2024"
+description = "Prototype of wfspan-style wait-free dynamic memory management"
+
+[features]
+default = ["std"]
+# std test/bench harness helpers (region provisioning, quiescent verifier).
+# Build with --no-default-features for a no_std-friendly core.
+std = []
+# GlobalAlloc wrapper with a thread-local token (requires std TLS).
+global = ["std"]
+# Extra runtime statistics (currently stats are always on; reserved).
+stats = []
+# Reserved for loom model testing (not wired up yet; see docs/progress.md).
+loom = []
+nightly = []
+
+[dependencies]
+
+[[bench]]
+name = "alloc_free"
+harness = false
+
+[[bench]]
+name = "remote_free"
+harness = false
+
+[[bench]]
+name = "wcet_like"
+harness = false
