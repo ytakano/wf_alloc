@@ -23,8 +23,18 @@ pub const HELP_BUDGET_H: usize = 1;
 pub const MIN_BLOCK_SIZE: usize = 16;
 
 /// Largest supported block size. Allocations larger than this (or with
-/// stronger alignment) are unsupported by the prototype and return null.
+/// stronger alignment) fall through to the large-object allocator.
 pub const MAX_BLOCK_SIZE: usize = SPAN_SIZE / 4;
+
+/// Smallest large-object size class (next power of two after MAX_BLOCK_SIZE).
+pub const MIN_LARGE_SIZE: usize = MAX_BLOCK_SIZE * 2; // 32 KiB
+
+/// Largest supported large-object allocation (4 GiB; requires 64-bit usize).
+pub const MAX_LARGE_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
+/// Number of power-of-two large-object size classes: 32 KiB, 64 KiB, …, 4 GiB.
+pub const LARGE_CLASSES: usize =
+    MAX_LARGE_SIZE.trailing_zeros() as usize - MIN_LARGE_SIZE.trailing_zeros() as usize + 1;
 
 /// Bytes reserved at the start of every span for the `SpanHeader`.
 pub const SPAN_HEADER_RESERVE: usize = 1024;

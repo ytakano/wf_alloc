@@ -112,6 +112,37 @@ fn unsupported_large_returns_null() {
     }
 }
 
+/// With `init_large`, the same layouts that previously returned null succeed.
+#[test]
+fn large_region_serves_oversized_for_small_pool() {
+    let small_region = OwnedRegion::new(2);
+    // 16 spans = 1 MiB; enough for one block of each test case even after
+    // alignment rounding (largest alloc_size here is 131 KiB for class 2).
+    let large_region = OwnedRegion::new(16);
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    // SAFETY: init once, before sharing; leaked box never moves.
+    unsafe {
+        alloc.init(small_region.ptr(), small_region.len());
+        alloc.init_large(large_region.ptr(), large_region.len());
+    }
+    let token = alloc.register_thread().unwrap();
+
+    for (size, align) in [(SPAN_SIZE, 8usize), (SPAN_SIZE / 2, 8), (64, SPAN_SIZE)] {
+        let layout = Layout::from_size_align(size, align).unwrap();
+        // SAFETY: valid token, single thread.
+        let p = unsafe { alloc.alloc_with_token(layout, token) };
+        assert!(
+            !p.is_null(),
+            "size={size} align={align}: should succeed with large region"
+        );
+        assert_eq!(p as usize % align, 0, "ptr not {align}-byte aligned");
+        // SAFETY: freed once.
+        unsafe { alloc.dealloc_with_token(p, layout, token) };
+    }
+    // SAFETY: quiescent.
+    unsafe { wf_alloc::verify::check_quiescent(alloc) };
+}
+
 #[test]
 fn registration_bounded() {
     let (alloc, _region) = setup(1);

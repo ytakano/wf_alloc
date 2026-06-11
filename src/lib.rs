@@ -47,6 +47,7 @@ pub mod block;
 pub mod config;
 pub mod heap;
 pub mod help_record;
+pub mod large;
 pub mod local_list;
 pub mod pagemap;
 pub mod remote_mpsc;
@@ -67,9 +68,11 @@ pub mod verify;
 pub use allocator::WfSpanAllocator;
 pub use atomic_backend::{Cas2Backend, DefaultCas2Backend};
 pub use config::{
-    HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, MAX_SUPPORTED_CLASSES, MIN_BLOCK_SIZE, OWNER_NONE,
-    OWNER_PUBLIC, SPAN_ALIGN, SPAN_SIZE,
+    HELP_BUDGET_H, LARGE_CLASSES, LOCAL_SPAN_LIMIT_K, MAX_BLOCK_SIZE, MAX_LARGE_SIZE,
+    MAX_SUPPORTED_CLASSES, MIN_BLOCK_SIZE, MIN_LARGE_SIZE, OWNER_NONE, OWNER_PUBLIC, SPAN_ALIGN,
+    SPAN_SIZE,
 };
+pub use large::large_size_class;
 pub use size_class::{class_to_size, size_to_class};
 pub use stats::{AllocatorStats, StepCounter, theoretical_extra_bound};
 pub use thread::{ThreadRegistry, ThreadToken};
