@@ -275,6 +275,62 @@ fn publish_then_acquire_via_helping() {
     unsafe { wf_alloc::verify::check_quiescent(alloc) };
 }
 
+/// Regression for the x86_64 CAS2 backend: public large-run acquisition uses
+/// `cmpxchg16b` to pop from SPMC run lists. The asm memory operand must not
+/// alias rbx while rbx carries the replacement low word.
+#[test]
+fn public_large_run_acquire_64k_and_1m() {
+    let cases = [
+        Layout::from_size_align(64 * 1024, 8).unwrap(),
+        Layout::from_size_align(1024 * 1024, 8).unwrap(),
+    ];
+
+    for layout in cases {
+        let class = run_class_for_layout(layout).unwrap();
+        let spans = (LARGE_LOCAL_RUN_LIMIT_K + 4) * (1 << class);
+        let (alloc, _region) = setup(spans);
+        let token_a = alloc.register_thread().unwrap();
+        let token_b = alloc.register_thread().unwrap();
+
+        let mut ptrs = Vec::new();
+        for _ in 0..(LARGE_LOCAL_RUN_LIMIT_K + 4) {
+            // SAFETY: valid token, single thread.
+            let p = unsafe { alloc.alloc_with_token(layout, token_a) };
+            assert!(!p.is_null(), "initial large allocation failed");
+            ptrs.push(p);
+        }
+        for &p in &ptrs {
+            // SAFETY: freed once; surplus runs publish after the local limit.
+            unsafe { alloc.dealloc_with_token(p, layout, token_a) };
+        }
+
+        let mut acquired = Vec::new();
+        for _ in 0..4 {
+            let mut step = StepCounter::new();
+            // SAFETY: token B has no local runs, so this must acquire from
+            // token A's public run list while the raw pool is exhausted.
+            let p = unsafe { alloc.alloc_with_token_counted(layout, token_b, &mut step) };
+            assert!(!p.is_null(), "public large-run acquisition failed");
+            step.assert_large_bounds(N, HELP_BUDGET_H, N, MAX_LARGE_RUN_CLASSES);
+            acquired.push(p);
+        }
+        assert!(
+            alloc
+                .stats
+                .acquired_public_runs
+                .load(std::sync::atomic::Ordering::Relaxed)
+                >= 4,
+            "large runs must come from public lists"
+        );
+
+        for &p in &acquired {
+            // SAFETY: freed once.
+            unsafe { alloc.dealloc_with_token(p, layout, token_b) };
+        }
+        unsafe { wf_alloc::verify::check_quiescent(alloc) };
+    }
+}
+
 /// Verify the exact small/large dispatch boundary with all small classes.
 #[test]
 fn size_class_boundary() {

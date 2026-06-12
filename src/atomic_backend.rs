@@ -68,14 +68,15 @@ mod x86 {
         let ok: u8;
         // SAFETY: single `lock cmpxchg16b` on a 16-byte-aligned location
         // (caller contract). rbx is reserved by LLVM, so it is swapped with
-        // a scratch register around the instruction.
+        // a scratch register around the instruction. The memory operand is
+        // pinned to rdi so it cannot alias rbx while rbx holds `new.ptr`.
         unsafe {
             core::arch::asm!(
                 "xchg {nb}, rbx",
-                "lock cmpxchg16b [{dst}]",
+                "lock cmpxchg16b [rdi]",
                 "sete {ok}",
                 "mov rbx, {nb}",
-                dst = in(reg) dst,
+                in("rdi") dst,
                 nb = inout(reg) new.ptr as u64 => _,
                 in("rcx") new.version as u64,
                 inout("rax") lo,
