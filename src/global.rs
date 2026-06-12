@@ -39,7 +39,7 @@ use crate::thread::ThreadToken;
 /// ```
 pub struct GlobalWfSpanAllocator<
     const N: usize,
-    const C: usize,
+    const C: usize = { crate::config::MAX_SUPPORTED_CLASSES },
     const HUGE_GRANULE_SPANS: usize = { crate::config::DEFAULT_HUGE_GRANULE_SPANS },
 > {
     pub inner: WfSpanAllocator<N, C, HUGE_GRANULE_SPANS>,

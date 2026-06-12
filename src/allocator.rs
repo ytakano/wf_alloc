@@ -44,7 +44,7 @@ use crate::thread::{ThreadRegistry, ThreadToken};
 /// See the [crate-level documentation](crate) for a complete quick-start example.
 pub struct WfSpanAllocator<
     const N: usize,
-    const C: usize,
+    const C: usize = { crate::config::MAX_SUPPORTED_CLASSES },
     const HUGE_GRANULE_SPANS: usize = { crate::config::DEFAULT_HUGE_GRANULE_SPANS },
 > {
     pub heaps: [ThreadHeap<C>; N],
