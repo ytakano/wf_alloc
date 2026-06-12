@@ -160,7 +160,7 @@ invariants after each test.
 
 This is a research prototype, not a production allocator:
 
-- x86_64 with `cmpxchg16b` only; other architectures fail to compile.
+- x86_64 and AArch64 only; other architectures fail to compile.
 - Fixed, caller-provided memory region; exhaustion returns null (the
   wait-free path never calls the OS). Raw spans are never returned to the
   pool — they recirculate through per-thread lists.
