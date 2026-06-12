@@ -18,6 +18,9 @@ pub struct StepCounter {
     pub blocks_scanned: usize,
     /// Run classes examined by one large allocation (≤ MAX_LARGE_RUN_CLASSES).
     pub large_class_steps: usize,
+    /// Directory slots examined by one huge allocation
+    /// (≤ MAX_HUGE_RUN_CLASSES * MAX_HUGE_RUNS_PER_CLASS).
+    pub huge_slot_scans: usize,
 }
 
 impl StepCounter {
@@ -130,6 +133,41 @@ impl StepCounter {
         // The large path never scans blocks.
         assert_eq!(self.blocks_scanned, 0, "large path scanned blocks");
     }
+
+    /// Assert the per-operation bounds of the HUGE path (one
+    /// `alloc_huge`/`dealloc_huge`). `r` = MAX_HUGE_RUN_CLASSES,
+    /// `slots` = MAX_HUGE_RUNS_PER_CLASS.
+    ///
+    /// One huge operation scans at most `r * slots` directory slots. Per
+    /// scanned slot: at most one claim CAS, and (for an EMPTY slot) at
+    /// most one carve FAA plus one rollback CAS. It never touches the
+    /// helping protocol, the span lists, or per-block free-lists.
+    /// Deallocation is a scan plus one store — no CAS at all.
+    pub fn assert_huge_bounds(&self, r: usize, slots: usize) {
+        assert!(
+            self.huge_slot_scans <= r * slots,
+            "huge_slot_scans {} exceeds bound",
+            self.huge_slot_scans
+        );
+        // One claim CAS per scanned slot + one rollback CAS per carve.
+        assert!(
+            self.cas_attempts <= 2 * self.huge_slot_scans,
+            "cas_attempts {} exceeds huge bound",
+            self.cas_attempts
+        );
+        // At most one carve FAA per EMPTY-claimed slot.
+        assert!(
+            self.faa_ops <= self.huge_slot_scans,
+            "faa_ops {} exceeds huge bound",
+            self.faa_ops
+        );
+        // The huge path never uses helping, queries, CAS2, or block scans.
+        assert_eq!(self.help_steps, 0, "huge path used helping");
+        assert_eq!(self.query_steps, 0, "huge path queried span lists");
+        assert_eq!(self.cas2_attempts, 0, "huge path used CAS2");
+        assert_eq!(self.blocks_scanned, 0, "huge path scanned blocks");
+        assert_eq!(self.large_class_steps, 0, "huge path entered large path");
+    }
 }
 
 /// Allocator-wide monotonic event counters (Relaxed; advisory).
@@ -161,6 +199,8 @@ pub struct AllocatorStats {
     pub run_help_record_runs: AtomicUsize,
     /// Runs reclaimed from a run HelpRecord on a later acquisition.
     pub run_help_record_reclaimed: AtomicUsize,
+    /// Huge runs lazily carved from the fixed pool into directory slots.
+    pub allocated_huge_runs: AtomicUsize,
 }
 
 impl AllocatorStats {
@@ -179,6 +219,7 @@ impl AllocatorStats {
             acquired_public_runs: AtomicUsize::new(0),
             run_help_record_runs: AtomicUsize::new(0),
             run_help_record_reclaimed: AtomicUsize::new(0),
+            allocated_huge_runs: AtomicUsize::new(0),
         }
     }
 

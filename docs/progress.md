@@ -18,6 +18,8 @@ constraints and shows where each is enforced.
 | `runlists_acquire_run` | O(N²) with H = 1, P = N (same shared core) | `acquire.rs::acquire_from_lists` |
 | large allocation | O(R · N²): ≤ R = MAX_LARGE_RUN_CLASSES class steps, each ≤ one acquire; one carve | `large.rs::alloc_large_with_token_counted` |
 | large deallocation | O(1): header read + owner store + one push or one publish | `large.rs::dealloc_large_with_token_counted` |
+| huge allocation | O(R_h · SLOTS): ≤ 12 slot scans, ≤ 1 claim CAS each, ≤ 1 carve FAA per EMPTY claim | `huge.rs::alloc_huge_with_token_counted` |
+| huge deallocation | O(R_h · SLOTS): bounded directory reverse lookup + one release store, no CAS | `huge.rs::dealloc_huge_with_token_counted` |
 | remote-chain absorption | ≤ blocks_per_span per span | `remote_mpsc.rs::append_remote_to_local_bounded` |
 
 The paper's alternative wfqueue-style protocol with an O(N) bound is not
@@ -36,6 +38,19 @@ Only loops statically bounded by one of: `N`, `C`, `P`, `H`, `K`,
 - `remove_bounded`: `for _ in 0..limit` (limit = current list length)
 - allocator init: `N × (C + MAX_LARGE_RUN_CLASSES)`
 - large class search: `for class in min_class..MAX_LARGE_RUN_CLASSES`
+- huge slot scan: `for class in min_class..MAX_HUGE_RUN_CLASSES`,
+  `for slot in 0..MAX_HUGE_RUNS_PER_CLASS` (alloc and dealloc lookup)
+
+## Why the huge path avoids the helping protocol
+
+GiB-scale requests must not flow through the large path's SPMC + helping
+machinery: a HelpRecord may strand one extra run per thread per class and
+`local_runs` retains up to K freed runs per thread per class — bounded,
+but at GiB granularity the bound is absurd (guide B.13: N = 64 threads ×
+3 classes × 1 GiB ≈ 192 GiB of stranded memory). The fixed slot directory
+has no help records and no caches: a freed huge run is globally claimable
+after one store, and the worst-case retained memory is exactly the carved
+directory capacity.
 
 ## Large-path exhaustion semantics
 
@@ -66,8 +81,10 @@ Every public alloc/dealloc path updates a `StepCounter`;
 operation in the concurrent smoke tests and the WCET-style bench, and
 `StepCounter::assert_large_bounds(N, H, P, R)` per large operation in the
 large test suites (including under contention, where the removed
-Treiber-stack implementation would have spun). This is an empirical
-guardrail against accidental unbounded loops, not a proof.
+Treiber-stack implementation would have spun), and
+`StepCounter::assert_huge_bounds(R_h, SLOTS)` per huge operation in the
+huge test suites. This is an empirical guardrail against accidental
+unbounded loops, not a proof.
 
 ## Failure (null) semantics
 

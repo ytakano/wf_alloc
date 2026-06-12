@@ -17,6 +17,7 @@ use crate::block::{Block, block_from_payload};
 use crate::config::{LOCAL_SPAN_LIMIT_K, OWNER_NONE, OWNER_PUBLIC};
 use crate::heap::ThreadHeap;
 use crate::help_record::HelpTable;
+use crate::huge::HugeArena;
 use crate::pagemap::FixedSpanPool;
 use crate::size_class::{class_to_size, size_to_class};
 use crate::span::{
@@ -29,7 +30,10 @@ use crate::thread::{ThreadRegistry, ThreadToken};
 /// Token-based wait-free span allocator.
 ///
 /// `N` is the maximum number of participating threads; `C` is the number of
-/// supported power-of-two size classes (1 ≤ `C` ≤ [`MAX_SUPPORTED_CLASSES`]).
+/// supported power-of-two size classes (1 ≤ `C` ≤ [`MAX_SUPPORTED_CLASSES`]);
+/// `HUGE_GRANULE_SPANS` is the huge-allocation granule in spans (default
+/// 16384 spans = 1 GiB) — requests of at least one granule dispatch to the
+/// bounded huge-slot directory instead of the large-run path.
 ///
 /// Call [`new`](Self::new) to construct, [`init`](Self::init) to wire up
 /// internal state and install backing memory, then
@@ -38,26 +42,52 @@ use crate::thread::{ThreadRegistry, ThreadToken};
 /// [`dealloc_with_token`](Self::dealloc_with_token).
 ///
 /// See the [crate-level documentation](crate) for a complete quick-start example.
-pub struct WfSpanAllocator<const N: usize, const C: usize> {
+pub struct WfSpanAllocator<
+    const N: usize,
+    const C: usize,
+    const HUGE_GRANULE_SPANS: usize = { crate::config::DEFAULT_HUGE_GRANULE_SPANS },
+> {
     pub heaps: [ThreadHeap<C>; N],
     pub help: HelpTable<N, C>,
     pub pool: FixedSpanPool,
     pub registry: ThreadRegistry,
     pub stats: AllocatorStats,
+    pub huge: HugeArena,
 }
 
-impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
+impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
+    WfSpanAllocator<N, C, HUGE_GRANULE_SPANS>
+{
+    /// Compile-time parameter validation, forced in [`Self::new`].
+    const VALID: () = {
+        assert!(N >= 1);
+        assert!(C >= 1 && C <= crate::config::MAX_SUPPORTED_CLASSES);
+        assert!(HUGE_GRANULE_SPANS >= 1);
+        // The huge threshold must lie strictly above every small class.
+        assert!(HUGE_GRANULE_SPANS * crate::config::SPAN_SIZE > crate::config::MAX_BLOCK_SIZE);
+        // The largest huge run must not overflow usize.
+        assert!(
+            HUGE_GRANULE_SPANS
+                .checked_mul(crate::config::SPAN_SIZE * crate::config::MAX_HUGE_GRANULES)
+                .is_some()
+        );
+    };
+
+    /// Huge dispatch threshold in bytes (= one huge granule, guide B.3/B.4):
+    /// requests with `layout.size() >= HUGE_THRESHOLD` use the huge path.
+    pub const HUGE_THRESHOLD: usize = HUGE_GRANULE_SPANS * crate::config::SPAN_SIZE;
+
     /// Create an allocator with uninitialized (unlinked) SPMC lists.
     /// [`Self::init`] must be called before use.
     pub const fn new() -> Self {
-        assert!(N >= 1);
-        assert!(C >= 1 && C <= crate::config::MAX_SUPPORTED_CLASSES);
+        let () = Self::VALID;
         Self {
             heaps: [const { ThreadHeap::new() }; N],
             help: HelpTable::new(),
             pool: FixedSpanPool::new(),
             registry: ThreadRegistry::new(N),
             stats: AllocatorStats::new(),
+            huge: HugeArena::new(),
         }
     }
 
@@ -214,10 +244,15 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
         token: ThreadToken,
         step: &mut StepCounter,
     ) -> *mut u8 {
-        // Dispatch oversized or over-aligned requests to the large-run path.
-        // The SAME pure-Layout predicate is used in dealloc, so a pointer
-        // allocated here is always freed on the matching path.
+        // Dispatch oversized or over-aligned requests to the large-run or
+        // huge-slot path. The SAME pure-Layout predicates are used in
+        // dealloc, so a pointer allocated here is always freed on the
+        // matching path.
         let Some(class) = Self::small_class(layout) else {
+            if layout.size() >= Self::HUGE_THRESHOLD {
+                // SAFETY: forwarded contract.
+                return unsafe { self.alloc_huge_with_token_counted(layout, token, step) };
+            }
             // SAFETY: forwarded contract.
             return unsafe { self.alloc_large_with_token_counted(layout, token, step) };
         };
@@ -260,8 +295,11 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
 
         // 2. Acquire a span from public SPMC span-lists (bounded helping).
         // SAFETY: tid is a valid registered id per token contract.
-        let span =
-            unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C>(self, tid, class, step) };
+        let span = unsafe {
+            spanlists_acquire_span::<DefaultCas2Backend, N, C, HUGE_GRANULE_SPANS>(
+                self, tid, class, step,
+            )
+        };
         if !span.is_null() {
             // SAFETY: acquire hands us exclusive ownership of `span`.
             unsafe {
@@ -350,12 +388,16 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
         if ptr.is_null() {
             return;
         }
-        // Dispatch by Layout, with the same predicate as in alloc. This
+        // Dispatch by Layout, with the same predicates as in alloc. This
         // guarantees span_from_ptr (SPAN_SIZE masking) is never applied to a
-        // large payload, whose masked address could be a headerless interior
-        // span of a run. Relies on the GlobalAlloc-style contract that
+        // large or huge payload, whose masked address could be a headerless
+        // interior span. Relies on the GlobalAlloc-style contract that
         // dealloc receives the same Layout the pointer was allocated with.
         if Self::small_class(layout).is_none() {
+            if layout.size() >= Self::HUGE_THRESHOLD {
+                // SAFETY: ptr came from the huge path (same predicate at alloc).
+                return unsafe { self.dealloc_huge_with_token_counted(ptr, layout, token, step) };
+            }
             // SAFETY: ptr came from the large path (same predicate at alloc).
             return unsafe { self.dealloc_large_with_token_counted(ptr, layout, token, step) };
         }
@@ -556,7 +598,7 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
     }
 }
 
-impl<const N: usize, const C: usize> Default for WfSpanAllocator<N, C> {
+impl<const N: usize, const C: usize, const HG: usize> Default for WfSpanAllocator<N, C, HG> {
     fn default() -> Self {
         Self::new()
     }
@@ -564,5 +606,5 @@ impl<const N: usize, const C: usize> Default for WfSpanAllocator<N, C> {
 
 // SAFETY: all shared state is atomics, SPMC/MPSC wait-free structures, or
 // owner-only fields whose handover is release/acquire synchronized.
-unsafe impl<const N: usize, const C: usize> Send for WfSpanAllocator<N, C> {}
-unsafe impl<const N: usize, const C: usize> Sync for WfSpanAllocator<N, C> {}
+unsafe impl<const N: usize, const C: usize, const HG: usize> Send for WfSpanAllocator<N, C, HG> {}
+unsafe impl<const N: usize, const C: usize, const HG: usize> Sync for WfSpanAllocator<N, C, HG> {}

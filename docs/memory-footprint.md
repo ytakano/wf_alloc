@@ -69,6 +69,30 @@ a class-`k` request from a class-`j > k` run when the exact class is
 unavailable; the over-allocation is temporary because the run returns to
 class `j` on free.
 
+## Huge-slot footprint sources
+
+The huge path (guide Appendix B; fixed slot directory, header-less) has a
+deliberately simple footprint profile:
+
+1. **Carved slot memory is retained forever.** A lazily carved slot keeps
+   its `2^r`-granule run for the allocator's lifetime, alternating
+   FREE ↔ ALLOCATED. Worst case: the full directory capacity,
+   `MAX_HUGE_RUNS_PER_CLASS · Σ 2^r · granule` (28 GiB at the 1 GiB
+   default — provision the region accordingly, or accept nulls).
+2. **Power-of-two granule rounding.** A 3-granule request consumes a
+   4-granule run (B.1 calls this acceptable for strict RT). Header-less
+   placement means requests of exactly 1/2/4 granules fit runs of exactly
+   that size — no extra class bump for the header.
+3. **No help-record or cache retention.** Unlike the large path, a freed
+   huge run is globally claimable immediately; nothing is stranded per
+   thread.
+
+Contiguity (guide B.12): the crate returns contiguous ranges of the
+caller-provided region — virtually contiguous. Physical contiguity (for
+DMA etc.) is the responsibility of whoever provides the region.
+
+`AllocatorStats::allocated_huge_runs` counts lazy carves.
+
 ## Measurement plan beyond the prototype
 
 Benchmark with `P = N, N/2, N/4` once `P` is configurable, and track a

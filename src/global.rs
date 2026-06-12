@@ -37,8 +37,12 @@ use crate::thread::ThreadToken;
 ///     unsafe { ALLOC.init(REGION.0.as_mut_ptr(), REGION.0.len()) };
 /// }
 /// ```
-pub struct GlobalWfSpanAllocator<const N: usize, const C: usize> {
-    pub inner: WfSpanAllocator<N, C>,
+pub struct GlobalWfSpanAllocator<
+    const N: usize,
+    const C: usize,
+    const HUGE_GRANULE_SPANS: usize = { crate::config::DEFAULT_HUGE_GRANULE_SPANS },
+> {
+    pub inner: WfSpanAllocator<N, C, HUGE_GRANULE_SPANS>,
 }
 
 std::thread_local! {
@@ -47,7 +51,7 @@ std::thread_local! {
     static THREAD_TOKEN_ID: Cell<usize> = const { Cell::new(usize::MAX) };
 }
 
-impl<const N: usize, const C: usize> GlobalWfSpanAllocator<N, C> {
+impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C, HG> {
     /// Create a new, uninitialized allocator.
     ///
     /// This is a `const fn` so it can be used in a `static` initializer before
@@ -114,14 +118,18 @@ impl<const N: usize, const C: usize> GlobalWfSpanAllocator<N, C> {
     }
 }
 
-impl<const N: usize, const C: usize> Default for GlobalWfSpanAllocator<N, C> {
+impl<const N: usize, const C: usize, const HG: usize> Default
+    for GlobalWfSpanAllocator<N, C, HG>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
 // SAFETY: GlobalAlloc requires Sync; the inner allocator is Sync.
-unsafe impl<const N: usize, const C: usize> GlobalAlloc for GlobalWfSpanAllocator<N, C> {
+unsafe impl<const N: usize, const C: usize, const HG: usize> GlobalAlloc
+    for GlobalWfSpanAllocator<N, C, HG>
+{
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match self.current_thread_token() {
             // SAFETY: token is valid for this thread; forwarded contract.

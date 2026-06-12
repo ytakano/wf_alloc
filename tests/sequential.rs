@@ -121,11 +121,20 @@ fn oversized_layouts_served_from_single_region() {
         unsafe { alloc.dealloc_with_token(p, layout, token) };
     }
 
-    // A request that cannot fit even the largest run class must return null.
+    // Requests beyond the largest huge class (4 GiB + 1 byte needs 8 one-GiB
+    // granules > MAX_HUGE_GRANULES) must return null in bounded steps.
+    let layout = Layout::from_size_align(wf_alloc::MAX_LARGE_SIZE + 1, 8).unwrap();
+    // SAFETY: valid token.
+    let p = unsafe { alloc.alloc_with_token(layout, token) };
+    assert!(p.is_null(), "request beyond the huge classes must return null");
+
+    // A 4 GiB request maps to huge class 2 (header-less: exactly
+    // MAX_HUGE_GRANULES granules), but this 16-span region cannot back the
+    // carve, so it also returns null — in bounded steps.
     let layout = Layout::from_size_align(wf_alloc::MAX_LARGE_SIZE, 8).unwrap();
     // SAFETY: valid token.
     let p = unsafe { alloc.alloc_with_token(layout, token) };
-    assert!(p.is_null(), "request beyond MAX_LARGE_SPANS must return null");
+    assert!(p.is_null(), "uncarvable huge request must return null");
 
     // SAFETY: quiescent.
     unsafe { wf_alloc::verify::check_quiescent(alloc) };

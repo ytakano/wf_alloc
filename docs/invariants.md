@@ -79,14 +79,36 @@ local ones online.
   `remote.free_count == 0`, no `OWNER_NONE`/`try_discard`/remote MPSC.
   Cross-thread free transfers the WHOLE run to the freeing thread.
 
+## HugeRunSlot invariants (guide Appendix B, header-less variant)
+
+- The directory is fixed: `MAX_HUGE_RUN_CLASSES × MAX_HUGE_RUNS_PER_CLASS`
+  slots; class `r` slots hold runs of `2^r` huge granules
+  (`HUGE_GRANULE_SPANS` spans each).
+- A slot is EMPTY (no memory, `base == 0`), FREE, or ALLOCATED — exactly
+  one. `base` is written once under the EMPTY→ALLOCATED claim and is
+  immutable afterwards, so FREE↔ALLOCATED needs no version (no ABA).
+- An ALLOCATED slot is not claimable; a freed slot becomes claimable with
+  one release store.
+- Slot memory is carved lazily from the shared pool and NEVER returns to
+  it; no huge run overlaps a small span or large run (page-occupancy
+  check).
+- Huge runs carry no `SpanHeader`, no hidden header, and never touch the
+  small-span machinery (no pagemap, no remote lists, no helping). All
+  metadata lives in the slot; dealloc finds the slot by a bounded
+  address-range scan of the directory.
+- No coalescing on the huge path.
+
 ## Dispatch invariant (single region)
 
-- Small-vs-large dispatch is a pure function of `Layout`
-  (`size_to_class` yields a class `< C` → small), applied identically in
-  alloc and dealloc. Hence `span_from_ptr` (SPAN_SIZE masking) is never
-  applied to a large payload, whose masked address could be a headerless
-  interior span of a run. This relies on the GlobalAlloc-style contract
-  that dealloc receives the Layout the pointer was allocated with.
+- Dispatch is a pure function of `Layout`, applied identically in alloc
+  and dealloc: `size_to_class` yields a class `< C` → small; otherwise
+  `size >= HUGE_THRESHOLD` (= one huge granule) → huge; otherwise large.
+  Hence `span_from_ptr` (SPAN_SIZE masking) is never applied to a large
+  or huge payload, whose masked address could be a headerless interior
+  span. This relies on the GlobalAlloc-style contract that dealloc
+  receives the Layout the pointer was allocated with.
+- A small-size, giant-alignment request dispatches large (size-based huge
+  rule, guide B.4); its alignment slack is honored by the large classes.
 
 ## MPSC invariants
 

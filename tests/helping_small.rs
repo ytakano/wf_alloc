@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use wf_alloc::DefaultCas2Backend;
 use wf_alloc::WfSpanAllocator;
 use wf_alloc::acquire::spanlists_acquire_span;
-use wf_alloc::config::{HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, OWNER_PUBLIC};
+use wf_alloc::config::{DEFAULT_HUGE_GRANULE_SPANS, HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, OWNER_PUBLIC};
 use wf_alloc::help_record::{EncodedReq, help_finishing_req, reclaim_request};
 use wf_alloc::region::OwnedRegion;
 use wf_alloc::size_class::blocks_per_span;
@@ -130,7 +130,7 @@ fn acquire_via_own_pop_and_via_helper() {
     // Own pop path: acquire finds the span on heap 0's public list.
     let mut step = StepCounter::new();
     // SAFETY: tid 1 used only by this thread; allocator initialized.
-    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C>(alloc, 1, 0, &mut step) };
+    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step) };
     assert_eq!(got, span);
     step.assert_bounds(N, HELP_BUDGET_H, N, blocks_per_span(class_to_size(0)), LOCAL_SPAN_LIMIT_K);
 
@@ -157,7 +157,7 @@ fn acquire_via_own_pop_and_via_helper() {
     let mut step2 = StepCounter::new();
     // SAFETY: as above.
     let got2 =
-        unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C>(alloc, 1, 0, &mut step2) };
+        unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step2) };
     assert_eq!(got2, span2, "completed record must be reclaimed first");
     assert_eq!(
         alloc.stats.help_record_reclaimed.load(Ordering::Relaxed),
@@ -183,13 +183,13 @@ fn one_request_two_spans_is_recoverable() {
 
     let mut step = StepCounter::new();
     // SAFETY: tid 1 single-threaded here.
-    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C>(alloc, 1, 0, &mut step) };
+    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step) };
     assert_eq!(got, span_a, "reclaim-before-publish must win");
 
     // Next acquire still finds span_b via the normal pop path: no span lost.
     let mut step = StepCounter::new();
     // SAFETY: as above.
-    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C>(alloc, 1, 0, &mut step) };
+    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step) };
     assert_eq!(got, span_b);
 
     // In-flight variant: a helper completes the request while the requester

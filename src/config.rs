@@ -43,6 +43,25 @@ pub const MAX_LARGE_SIZE: usize = MAX_LARGE_SPANS * SPAN_SIZE;
 /// it publishes freed runs to its public SPMC run-list.
 pub const LARGE_LOCAL_RUN_LIMIT_K: usize = 8;
 
+/// Default huge-granule size in spans (16384 spans × 64 KiB = 1 GiB).
+/// The actual granule is the `HUGE_GRANULE_SPANS` const generic on
+/// [`crate::WfSpanAllocator`]; this is its default. The huge threshold
+/// equals the granule size: requests with `size >= granule` dispatch to
+/// the huge path (guide Appendix B.3/B.4).
+pub const DEFAULT_HUGE_GRANULE_SPANS: usize = 16 * 1024;
+
+/// Number of power-of-two huge-run classes: class `r` is `2^r` huge
+/// granules (1/2/4 granules with the default of 3 classes).
+pub const MAX_HUGE_RUN_CLASSES: usize = 3;
+
+/// Granules in the largest huge run class.
+pub const MAX_HUGE_GRANULES: usize = 1 << (MAX_HUGE_RUN_CLASSES - 1);
+
+/// Fixed huge-run directory slots per class (guide B.7): at most this many
+/// runs of one huge class may be live simultaneously; further huge
+/// allocations of that class return null until one is freed.
+pub const MAX_HUGE_RUNS_PER_CLASS: usize = 4;
+
 /// Bytes reserved at the start of every span for the `SpanHeader`.
 pub const SPAN_HEADER_RESERVE: usize = 1024;
 
@@ -66,5 +85,8 @@ const _: () = assert!(MAX_BLOCK_SIZE.is_power_of_two());
 const _: () = assert!(MIN_BLOCK_SIZE >= core::mem::size_of::<usize>() * 2);
 const _: () = assert!(MAX_LARGE_RUN_CLASSES >= 1);
 const _: () = assert!(LARGE_LOCAL_RUN_LIMIT_K >= 1);
+const _: () = assert!(MAX_HUGE_RUN_CLASSES >= 1);
+const _: () = assert!(MAX_HUGE_RUNS_PER_CLASS >= 1);
+const _: () = assert!(DEFAULT_HUGE_GRANULE_SPANS >= 1);
 // MAX_LARGE_SIZE (4 GiB) requires a 64-bit usize.
 const _: () = assert!(usize::BITS >= 64);

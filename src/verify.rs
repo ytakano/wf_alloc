@@ -15,6 +15,7 @@ use crate::atomic_backend::{Cas2Backend, DefaultCas2Backend};
 use crate::block::UNLINKED;
 use crate::config::{OWNER_PUBLIC, SPAN_SIZE};
 use crate::help_record::EncodedReq;
+use crate::huge::{HUGE_SLOT_ALLOCATED, HUGE_SLOT_EMPTY, HUGE_SLOT_FREE};
 use crate::span::{SpanHeader, SpanState};
 use crate::spmc_span_list::SpanNode;
 
@@ -45,12 +46,12 @@ impl PageOccupancy {
 /// Panics on any violated invariant. Returns the number of spans AND runs
 /// seen in local lists, public lists, and help records (discarded spans are
 /// in no list and are not counted; neither are runs/blocks held by live
-/// user allocations).
+/// user allocations, nor huge directory slots).
 ///
 /// # Safety
 /// The allocator must be initialized and quiescent (no concurrent ops).
-pub unsafe fn check_quiescent<const N: usize, const C: usize>(
-    alloc: &WfSpanAllocator<N, C>,
+pub unsafe fn check_quiescent<const N: usize, const C: usize, const HG: usize>(
+    alloc: &WfSpanAllocator<N, C, HG>,
 ) -> (usize, usize, usize) {
     let mut seen: HashSet<usize> = HashSet::new();
     let mut pages = PageOccupancy {
@@ -165,6 +166,26 @@ pub unsafe fn check_quiescent<const N: usize, const C: usize>(
                         "run-help-record run must be PUBLIC"
                     );
                     in_help += 1;
+                }
+            }
+        }
+
+        // Huge directory slots: a non-EMPTY slot owns its carved granules
+        // forever (FREE and ALLOCATED alike) — claim them so no small span
+        // or large run may overlap a huge run (guide B.14).
+        for (class, pool) in alloc.huge.slots.iter().enumerate() {
+            for slot in pool {
+                let state = slot.state.load(Ordering::Relaxed);
+                let base = slot.base.load(Ordering::Relaxed);
+                match state {
+                    HUGE_SLOT_EMPTY => {
+                        assert_eq!(base, 0, "EMPTY huge slot with carved memory");
+                    }
+                    HUGE_SLOT_FREE | HUGE_SLOT_ALLOCATED => {
+                        assert_ne!(base, 0, "carved huge slot without memory");
+                        pages.claim(base as *mut SpanHeader, (1usize << class) * HG);
+                    }
+                    other => panic!("invalid huge slot state {other}"),
                 }
             }
         }

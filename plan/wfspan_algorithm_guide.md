@@ -2692,6 +2692,8 @@ Rules:
 
 ## A.16 Summary
 
+For GiB-scale allocations, see Appendix B. Do not simply raise `MAX_LARGE_SPANS` to tens of thousands unless that WCET is acceptable.
+
 Large allocations can be supported without abandoning the wfspan idea, but the design should not try to make the small-object span algorithm handle huge objects directly. The clean fix is a separate LargeRun allocator:
 
 ```text
@@ -2708,3 +2710,697 @@ no global heap lock
 non-linearizable internal lists are acceptable
 extra memory footprint is bounded and measurable
 ```
+
+---
+
+# Appendix B: Huge Allocation Extension
+
+This appendix adds a third allocation path for GiB-scale allocations. It is intentionally separate from the small-object span path and from the span-count-based LargeRun path in Appendix A.
+
+The main reason is WCET. With a 64 KiB span, a 4 GiB allocation covers 65,536 spans. Updating metadata, pagemap entries, or run state per 64 KiB span is technically bounded if `MAX_LARGE_SPANS` is huge, but the bound is too large for a real-time allocator. The huge path therefore uses a much larger allocation granule and a fixed directory of pre-provisioned huge runs.
+
+Recommended tiering:
+
+```text
+small allocation:
+  objects smaller than one small span
+  block allocation inside a 64 KiB span
+
+large allocation:
+  medium-size objects
+  whole runs of large granules, for example 2 MiB granules
+
+huge allocation:
+  GiB-scale objects
+  whole runs of huge granules, for example 1 GiB granules
+```
+
+This appendix describes the huge path as an implementation extension. It is not a new claim made by the original paper. The paper says that sizes larger than the span size are handled by power-of-two size classes and that large allocation metadata is kept in a flat pagemap keyed by span index. This appendix specializes that idea for GiB-scale allocations by using a coarser granularity.
+
+## B.1 Design goals
+
+Huge allocation must not make the allocator's WCET explode.
+
+Required properties:
+
+```text
+- no unbounded search for contiguous 64 KiB spans
+- no per-64 KiB-span metadata update for GiB-scale objects
+- no unbounded CAS retry loop
+- no OS allocation on the RT wait-free path
+- no coalescing in the deallocation fast path
+- allocation either claims a pre-existing huge run or returns null/error
+- deallocation releases the whole huge run in bounded steps
+```
+
+Huge allocation should optimize predictability over memory efficiency. A request for 3 GiB may consume a 4 GiB run. That is acceptable in strict RT mode if the bound is explicit and the memory budget is configured accordingly.
+
+## B.2 Why not just increase `MAX_LARGE_SPANS`?
+
+With `SPAN_SIZE = 64 KiB`:
+
+```text
+1 GiB = 16,384 spans
+2 GiB = 32,768 spans
+4 GiB = 65,536 spans
+```
+
+A simple LargeRun implementation might do this:
+
+```rust
+for i in 0..run.span_count {
+    pagemap[base_span_index + i].store_large_run(base_run);
+}
+```
+
+That loop is bounded by `MAX_LARGE_SPANS`, but the bound is enormous for a memory allocation operation. This is the wrong shape for hard real-time systems.
+
+Instead, huge allocation should use a coarser metadata unit:
+
+```text
+small span:      64 KiB
+large granule:    2 MiB
+huge granule:     1 GiB
+```
+
+Then:
+
+```text
+1 GiB = 1 huge granule
+2 GiB = 2 huge granules
+4 GiB = 4 huge granules
+```
+
+The allocator now updates at most a few huge-granule metadata entries rather than tens of thousands of small-span entries.
+
+## B.3 New constants
+
+A reasonable starting configuration is:
+
+```rust
+pub const SMALL_SPAN_SIZE: usize = 64 * 1024;
+
+pub const LARGE_GRANULE_SIZE: usize = 2 * 1024 * 1024;
+pub const LARGE_THRESHOLD: usize = SMALL_SPAN_SIZE;
+pub const HUGE_THRESHOLD: usize = 1024 * 1024 * 1024; // 1 GiB
+
+pub const HUGE_GRANULE_SIZE: usize = 1024 * 1024 * 1024; // 1 GiB
+pub const MAX_HUGE_RUN_CLASSES: usize = 3;
+// class 0 = 1 GiB
+// class 1 = 2 GiB
+// class 2 = 4 GiB
+
+pub const MAX_HUGE_GRANULES: usize = 1 << (MAX_HUGE_RUN_CLASSES - 1);
+pub const MAX_HUGE_ALLOCATION_SIZE: usize =
+    HUGE_GRANULE_SIZE * MAX_HUGE_GRANULES;
+
+pub const MAX_HUGE_RUNS_PER_CLASS: usize = 4;
+```
+
+The relation is:
+
+```text
+MAX_HUGE_GRANULES = 1 << (MAX_HUGE_RUN_CLASSES - 1)
+```
+
+For the example above:
+
+```text
+MAX_HUGE_GRANULES = 4
+MAX_HUGE_ALLOCATION_SIZE = 4 GiB
+```
+
+If 8 GiB must be supported:
+
+```rust
+pub const MAX_HUGE_RUN_CLASSES: usize = 4;
+// 1, 2, 4, 8 GiB
+```
+
+If internal fragmentation must be lower, use a smaller huge granule, such as 512 MiB, or keep allocations below 1 GiB on the 2 MiB large-granule path.
+
+## B.4 Dispatch rules
+
+Use three separate allocation paths:
+
+```rust
+pub unsafe fn alloc_with_token(
+    &self,
+    layout: Layout,
+    token: ThreadToken,
+) -> *mut u8 {
+    let size = layout.size();
+
+    if size < LARGE_THRESHOLD {
+        self.alloc_small_with_token(layout, token)
+    } else if size < HUGE_THRESHOLD {
+        self.alloc_large_with_token(layout, token)
+    } else {
+        self.alloc_huge_with_token(layout, token)
+    }
+}
+```
+
+Deallocation can dispatch by `Layout`, by a hidden header, or by pagemap classification. The recommended implementation uses the hidden header for large and huge allocations:
+
+```rust
+pub unsafe fn dealloc_with_token(
+    &self,
+    ptr: *mut u8,
+    layout: Layout,
+    token: ThreadToken,
+) {
+    if layout.size() < LARGE_THRESHOLD {
+        self.dealloc_small_with_token(ptr, layout, token)
+    } else if layout.size() < HUGE_THRESHOLD {
+        self.dealloc_large_with_token(ptr, layout, token)
+    } else {
+        self.dealloc_huge_with_token(ptr, layout, token)
+    }
+}
+```
+
+For `GlobalAlloc`, the caller must pass the same `Layout` to `dealloc` that was used for `alloc`. If the layout is wrong, behavior is already outside the allocator contract.
+
+## B.5 HugeRun model
+
+A HugeRun is a contiguous range of huge granules.
+
+```text
+HugeRun
+  base_huge_granule_index
+  huge_granule_count
+  run_class
+  state: FREE or ALLOCATED
+  owner: last allocating or freeing thread, used only for stats/debugging
+  base_addr
+  size_bytes
+```
+
+Run classes are powers of two in huge granules:
+
+```text
+class 0: 1 huge granule
+class 1: 2 huge granules
+class 2: 4 huge granules
+class 3: 8 huge granules
+...
+```
+
+With `HUGE_GRANULE_SIZE = 1 GiB`:
+
+```text
+class 0: 1 GiB
+class 1: 2 GiB
+class 2: 4 GiB
+class 3: 8 GiB
+```
+
+The run class for a request is:
+
+```text
+needed_bytes = requested_size + header_size + alignment_slack
+needed_granules = ceil(needed_bytes / HUGE_GRANULE_SIZE)
+run_class = ceil_log2(needed_granules)
+```
+
+## B.6 Metadata
+
+Huge allocation uses a hidden header immediately before the returned payload.
+
+```rust
+#[repr(C)]
+pub struct HugeAllocHeader {
+    magic: u64,
+    slot_index: u32,
+    run_class: u16,
+    huge_granule_count: u16,
+    requested_size: usize,
+    requested_align: usize,
+    run: *mut HugeRunSlot,
+}
+```
+
+The run directory entry is:
+
+```rust
+#[repr(C, align(64))]
+pub struct HugeRunSlot {
+    state: AtomicUsize,
+    base_addr: *mut u8,
+    size_bytes: usize,
+    base_huge_granule_index: u64,
+    huge_granule_count: u16,
+    run_class: u16,
+    owner: AtomicUsize,
+}
+```
+
+State values:
+
+```rust
+pub const HUGE_RUN_FREE: usize = 0;
+pub const HUGE_RUN_ALLOCATED: usize = 1;
+```
+
+Avoid a long-lived `CLAIMING` state in the strict RT path. A thread should claim a run with a single `FREE -> ALLOCATED` CAS and then initialize the hidden header before returning the payload. Other threads cannot deallocate that allocation before the pointer has been returned to the caller.
+
+## B.7 HugeRun directory instead of SPMC helping by default
+
+For ordinary large allocations, reusing the SPMC run-list and helping protocol is reasonable. For huge allocations, however, the non-linearizable helping protocol can temporarily hold an extra run in a help record. If that run is 1 GiB or 4 GiB, the bounded memory footprint may become absurdly large.
+
+Therefore the recommended huge path is a fixed, pre-provisioned directory of huge run slots:
+
+```rust
+pub struct HugeClassPool<const SLOTS: usize> {
+    slots: [HugeRunSlot; SLOTS],
+}
+
+pub struct HugeArena<const R: usize, const SLOTS: usize> {
+    classes: [HugeClassPool<SLOTS>; R],
+}
+```
+
+Allocation scans a bounded number of slots. It performs at most one CAS attempt per slot. There is no retry loop and no HelpRecord that can retain an extra huge run.
+
+This is still wait-free in the per-operation sense: each allocation completes after a fixed bounded scan. It may return null if it does not observe a free slot during that scan.
+
+## B.8 Huge allocation algorithm
+
+```rust
+pub unsafe fn alloc_huge_with_token<const R: usize, const SLOTS: usize>(
+    arena: &HugeArena<R, SLOTS>,
+    layout: Layout,
+    token: ThreadToken,
+    step: &mut StepCounter,
+) -> *mut u8 {
+    let header_size = core::mem::size_of::<HugeAllocHeader>();
+    let align = layout.align().max(core::mem::align_of::<HugeAllocHeader>());
+
+    let needed = match layout
+        .size()
+        .checked_add(header_size)
+        .and_then(|x| x.checked_add(align - 1))
+    {
+        Some(x) => x,
+        None => return core::ptr::null_mut(),
+    };
+
+    let needed_granules = ceil_div(needed, HUGE_GRANULE_SIZE);
+    if needed_granules == 0 || needed_granules > MAX_HUGE_GRANULES {
+        return core::ptr::null_mut();
+    }
+
+    let min_class = ceil_log2(needed_granules);
+
+    // Bounded upward class search.
+    for class in min_class..R {
+        for slot_index in 0..SLOTS {
+            step.huge_slot_scans += 1;
+
+            let slot = &arena.classes[class].slots[slot_index];
+
+            if slot
+                .state
+                .compare_exchange(
+                    HUGE_RUN_FREE,
+                    HUGE_RUN_ALLOCATED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_err()
+            {
+                continue;
+            }
+
+            slot.owner.store(token.id(), Ordering::Release);
+
+            let payload = place_huge_header_and_payload(
+                slot,
+                class,
+                slot_index,
+                layout,
+            );
+
+            publish_huge_map_entries_bounded(slot, step);
+            return payload;
+        }
+    }
+
+    core::ptr::null_mut()
+}
+```
+
+The only loops are bounded by `R` and `SLOTS`.
+
+Progress bound:
+
+```text
+alloc_huge:
+  O(MAX_HUGE_RUN_CLASSES * MAX_HUGE_RUNS_PER_CLASS + MAX_HUGE_GRANULES)
+
+dealloc_huge:
+  O(1)
+  or O(MAX_HUGE_GRANULES) if huge-map entries are cleared immediately
+```
+
+## B.9 Header and payload placement
+
+Huge allocation must support large alignment requests.
+
+```rust
+unsafe fn place_huge_header_and_payload(
+    slot: &HugeRunSlot,
+    class: usize,
+    slot_index: usize,
+    layout: Layout,
+) -> *mut u8 {
+    let base = slot.base_addr as usize;
+    let header_size = core::mem::size_of::<HugeAllocHeader>();
+    let align = layout.align().max(core::mem::align_of::<HugeAllocHeader>());
+
+    let payload_addr = align_up(base + header_size, align);
+    let hdr_addr = payload_addr - header_size;
+
+    let hdr = hdr_addr as *mut HugeAllocHeader;
+    (*hdr).magic = HUGE_MAGIC;
+    (*hdr).slot_index = slot_index as u32;
+    (*hdr).run_class = class as u16;
+    (*hdr).huge_granule_count = slot.huge_granule_count;
+    (*hdr).requested_size = layout.size();
+    (*hdr).requested_align = layout.align();
+    (*hdr).run = slot as *const HugeRunSlot as *mut HugeRunSlot;
+
+    payload_addr as *mut u8
+}
+```
+
+Before claiming the slot, the allocator must ensure that:
+
+```text
+layout.size + header_size + alignment_slack <= slot.size_bytes
+```
+
+The class computation already includes this requirement, but debug builds should assert it again.
+
+## B.10 Huge deallocation algorithm
+
+```rust
+pub unsafe fn dealloc_huge_with_token(
+    ptr: *mut u8,
+    layout: Layout,
+    token: ThreadToken,
+    step: &mut StepCounter,
+) {
+    let hdr = (ptr as *mut u8).sub(core::mem::size_of::<HugeAllocHeader>())
+        as *mut HugeAllocHeader;
+
+    debug_assert_eq!((*hdr).magic, HUGE_MAGIC);
+    debug_assert_eq!((*hdr).requested_size, layout.size());
+    debug_assert_eq!((*hdr).requested_align, layout.align());
+
+    let slot = (*hdr).run;
+    debug_assert!(!slot.is_null());
+
+    (*slot).owner.store(token.id(), Ordering::Release);
+
+    // Optional: clear huge-map entries. This loop is bounded by MAX_HUGE_GRANULES.
+    clear_huge_map_entries_bounded(slot, step);
+
+    let old = (*slot).state.swap(HUGE_RUN_FREE, Ordering::AcqRel);
+    debug_assert_eq!(old, HUGE_RUN_ALLOCATED);
+}
+```
+
+Do not coalesce huge runs in the deallocation path. If coalescing or rebalancing is required, perform it in a separate maintenance routine with an explicit bounded budget.
+
+## B.11 Huge metadata map
+
+For huge allocations, do not update the small-span pagemap for every 64 KiB span.
+
+Use either:
+
+```text
+1. hidden header only
+2. hidden header + huge-granule map
+```
+
+The huge-granule map is indexed by huge granule, not by small span:
+
+```rust
+#[repr(C)]
+pub struct HugeMapEntry {
+    encoded: AtomicUsize,
+}
+```
+
+Recommended encoding:
+
+```text
+bits 0..2: kind
+remaining bits: huge run slot index or base huge granule index
+```
+
+Publish entries with a bounded loop:
+
+```rust
+unsafe fn publish_huge_map_entries_bounded(
+    slot: &HugeRunSlot,
+    step: &mut StepCounter,
+) {
+    for i in 0..slot.huge_granule_count as usize {
+        debug_assert!(i < MAX_HUGE_GRANULES);
+        huge_map_store(slot.base_huge_granule_index + i as u64, slot);
+        step.huge_map_updates += 1;
+    }
+}
+```
+
+For a 4 GiB run with 1 GiB huge granules, this loop has four iterations.
+
+## B.12 Virtual contiguity vs physical contiguity
+
+The huge allocator must state what kind of contiguity it provides.
+
+### Virtual-contiguous huge allocation
+
+If the system has an MMU and the caller only needs a contiguous virtual address range, the huge path can reserve a virtual arena at boot or initialization time:
+
+```text
+virtual address range is contiguous
+physical pages may be non-contiguous
+```
+
+This is usually the easiest way to support multi-GiB allocations.
+
+In strict RT mode, page tables and physical backing should be pre-populated or otherwise bounded. Lazy page faults are not part of the wait-free allocator path.
+
+### Physical-contiguous huge allocation
+
+If a device or subsystem requires physically contiguous memory, the allocator cannot magically produce arbitrary GiB-scale contiguous memory after the system has fragmented.
+
+Use one of these policies:
+
+```text
+- reserve a physically contiguous huge arena at boot
+- allocate from pre-reserved huge pages
+- use IOMMU remapping if available
+- use scatter-gather DMA instead of requiring physical contiguity
+```
+
+The huge path must document whether it returns virtual-contiguous memory, physical-contiguous memory, or both.
+
+## B.13 Optional wfspan-style huge run-lists
+
+A coding agent may be tempted to reuse Appendix A's `SpmcRunList` for huge runs. This is allowed only behind an explicit feature flag:
+
+```text
+feature = "huge_spmc_helping"
+```
+
+Rules:
+
+```text
+- reuse the one-shot SPMC pop rule
+- reuse bounded helping
+- count huge runs retained in HelpRecords
+- expose the worst-case huge HelpRecord footprint in stats
+```
+
+Memory-footprint warning:
+
+```text
+extra_huge_help_record_footprint <= N * RH * HUGE_GRANULE_SIZE
+```
+
+where `RH` is the number of huge run classes with HelpRecords.
+
+With `N = 64`, `RH = 3`, and `HUGE_GRANULE_SIZE = 1 GiB`, this bound is already 192 GiB. That may be bounded, but it is probably unacceptable. Therefore the fixed slot-directory design in B.7 is the recommended default.
+
+## B.14 Updated invariants
+
+Add these invariants:
+
+```text
+A HugeRunSlot is either FREE or ALLOCATED, never both.
+A HugeRunSlot belongs to exactly one huge run class.
+An allocated HugeRunSlot is not claimable by another thread.
+A freed HugeRunSlot becomes claimable with one atomic state update.
+The returned payload pointer has a valid HugeAllocHeader immediately before it.
+HugeAllocHeader.run points to the claimed HugeRunSlot.
+HugeAllocHeader.slot_index identifies the slot inside its class pool.
+HugeRunSlot.size_bytes is large enough for payload + header + alignment slack.
+HugeMap entries, if enabled, are updated only per huge granule, never per 64 KiB span.
+No small span or LargeRun overlaps a HugeRunSlot.
+No coalescing is performed in the huge deallocation fast path.
+Huge allocation does not use OS allocation in rt_fixed mode.
+```
+
+## B.15 StepCounter additions
+
+Extend `StepCounter`:
+
+```rust
+#[derive(Default, Clone, Copy)]
+pub struct StepCounter {
+    // existing fields
+    pub cas_attempts: usize,
+    pub help_steps: usize,
+    pub span_queries: usize,
+
+    // large/huge fields
+    pub large_class_scans: usize,
+    pub large_map_updates: usize,
+    pub huge_class_scans: usize,
+    pub huge_slot_scans: usize,
+    pub huge_map_updates: usize,
+}
+```
+
+Add assertions such as:
+
+```text
+huge_class_scans <= MAX_HUGE_RUN_CLASSES
+huge_slot_scans <= MAX_HUGE_RUN_CLASSES * MAX_HUGE_RUNS_PER_CLASS
+huge_map_updates <= MAX_HUGE_GRANULES
+```
+
+## B.16 Test plan
+
+Use tiny constants in unit tests so the behavior is easy to exhaustively exercise:
+
+```text
+TEST_HUGE_GRANULE_SIZE = 4096
+TEST_MAX_HUGE_RUN_CLASSES = 3
+TEST_MAX_HUGE_RUNS_PER_CLASS = 2
+```
+
+Tests:
+
+```text
+1. allocate exactly one huge granule
+2. allocate two huge granules
+3. allocate three granules and verify class rounds to four
+4. allocation above MAX_HUGE_ALLOCATION_SIZE returns null
+5. alignment larger than the header alignment works
+6. deallocation returns the slot to FREE
+7. double free is detected in debug mode
+8. concurrent allocation never returns the same HugeRunSlot twice
+9. bounded scan counters stay within limits
+10. huge path never updates the 64 KiB small-span pagemap
+11. virtual-contiguous and physical-contiguous modes are documented separately
+```
+
+For concurrent tests, intentionally force many threads to allocate from a small number of huge slots. Some threads should receive null. No two successful threads may receive overlapping huge runs.
+
+## B.17 Updated implementation order
+
+Add these milestones after Appendix A's LargeRun path, or implement them first if GiB-scale allocation is required before medium-size large allocation.
+
+```text
+Milestone H1: huge configuration and documentation
+  - HUGE_THRESHOLD
+  - HUGE_GRANULE_SIZE
+  - MAX_HUGE_RUN_CLASSES
+  - MAX_HUGE_RUNS_PER_CLASS
+  - virtual vs physical contiguity policy
+
+Milestone H2: HugeRun directory
+  - HugeRunSlot
+  - HugeClassPool
+  - HugeArena
+  - fixed pre-provisioned huge ranges
+
+Milestone H3: huge header and payload placement
+  - HugeAllocHeader
+  - huge_class_for_layout
+  - place_huge_header_and_payload
+  - alignment tests
+
+Milestone H4: huge allocation/deallocation
+  - bounded slot scan
+  - one CAS attempt per slot
+  - deallocation via hidden header
+  - no coalescing
+
+Milestone H5: huge metadata map and stats
+  - optional HugeMapEntry
+  - per-huge-granule map updates
+  - StepCounter bounds
+  - footprint statistics
+
+Milestone H6: concurrency tests
+  - no duplicate huge run allocation
+  - exhaustion returns null
+  - remote-thread deallocation
+  - stress test with tiny simulated huge granules
+```
+
+## B.18 Agent prompt patch
+
+Add this to the coding-agent prompt:
+
+```text
+Add a Huge Allocation path for GiB-scale allocations.
+
+Design:
+- Keep small allocation, large allocation, and huge allocation as separate paths.
+- Huge allocation uses HUGE_GRANULE_SIZE, not the 64 KiB small span size.
+- Default HUGE_GRANULE_SIZE is 1 GiB for RT configurations that need multi-GiB allocations.
+- Huge run classes are powers of two in huge-granule counts.
+- Use a fixed pre-provisioned HugeArena with bounded HugeRunSlot arrays.
+- Allocation scans at most MAX_HUGE_RUN_CLASSES * MAX_HUGE_RUNS_PER_CLASS slots.
+- Each slot is tried with at most one FREE -> ALLOCATED CAS.
+- No unbounded retry loop is allowed.
+- Deallocation uses HugeAllocHeader immediately before the payload.
+- Do not use the small-span pagemap for every 64 KiB span in a huge run.
+- If a metadata map is required, use a huge-granule map.
+- Do not coalesce huge runs in the bounded deallocation path.
+- Do not call the OS allocator in rt_fixed mode.
+- Document whether huge allocation is virtual-contiguous or physical-contiguous.
+
+Avoid by default:
+- SPMC helping for huge runs, because HelpRecords may retain extra GiB-scale runs.
+- Per-64 KiB metadata updates for huge allocations.
+- Lazy page faults in the RT path.
+```
+
+## B.19 Summary
+
+GiB-scale allocation should not be implemented by merely increasing `MAX_LARGE_SPANS`. That keeps the algorithm bounded in theory, but the bound becomes too large.
+
+Use a third path instead:
+
+```text
+small:
+  64 KiB spans split into blocks
+
+large:
+  2 MiB granule runs for medium-size allocations
+
+huge:
+  1 GiB granule runs from a fixed pre-provisioned HugeArena
+```
+
+The recommended huge path is a bounded slot-directory allocator, not the SPMC helping protocol. This avoids a pathological but bounded memory-footprint explosion where help records temporarily retain extra GiB-scale runs.
+

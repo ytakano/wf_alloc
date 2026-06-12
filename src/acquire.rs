@@ -46,8 +46,13 @@ struct AcquireStats<'a> {
 /// # Safety
 /// `tid` must be a valid registered thread id (`< N`) used only by the
 /// calling thread; the allocator must be initialized.
-pub unsafe fn spanlists_acquire_span<B: Cas2Backend, const N: usize, const C: usize>(
-    alloc: &WfSpanAllocator<N, C>,
+pub unsafe fn spanlists_acquire_span<
+    B: Cas2Backend,
+    const N: usize,
+    const C: usize,
+    const HG: usize,
+>(
+    alloc: &WfSpanAllocator<N, C, HG>,
     tid: usize,
     size_class: usize,
     step: &mut StepCounter,
@@ -81,8 +86,13 @@ pub unsafe fn spanlists_acquire_span<B: Cas2Backend, const N: usize, const C: us
 ///
 /// # Safety
 /// As for [`spanlists_acquire_span`]; `run_class < MAX_LARGE_RUN_CLASSES`.
-pub unsafe fn runlists_acquire_run<B: Cas2Backend, const N: usize, const C: usize>(
-    alloc: &WfSpanAllocator<N, C>,
+pub unsafe fn runlists_acquire_run<
+    B: Cas2Backend,
+    const N: usize,
+    const C: usize,
+    const HG: usize,
+>(
+    alloc: &WfSpanAllocator<N, C, HG>,
     tid: usize,
     run_class: usize,
     step: &mut StepCounter,

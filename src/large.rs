@@ -27,10 +27,14 @@
 //!   └─ payload (layout.align()-aligned)                ← returned to caller
 //! ```
 //!
-//! Dispatch between the small and large paths is a pure function of the
-//! `Layout` (`size_to_class`), identical in alloc and dealloc. Hence
-//! `span_from_ptr` (SPAN_SIZE masking) is never applied to a large payload,
-//! whose masked address could be a headerless interior span of the run.
+//! Dispatch between the small, large, and huge paths is a pure function of
+//! the `Layout`, identical in alloc and dealloc. Hence `span_from_ptr`
+//! (SPAN_SIZE masking) is never applied to a large payload, whose masked
+//! address could be a headerless interior span of the run. Requests with
+//! `size >= WfSpanAllocator::HUGE_THRESHOLD` (one huge granule; default
+//! 1 GiB) never reach this path — they use the bounded huge-slot directory
+//! (`huge.rs`), which avoids GiB-scale runs lingering in help records and
+//! per-thread caches.
 
 use core::alloc::Layout;
 use core::sync::atomic::Ordering;
@@ -130,7 +134,7 @@ unsafe fn place_large_payload(
     payload
 }
 
-impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
+impl<const N: usize, const C: usize, const HG: usize> WfSpanAllocator<N, C, HG> {
     /// Large allocation (guide A.7, Policy 1). Bounded: at most
     /// `MAX_LARGE_RUN_CLASSES` class steps, each one local pop (O(1)) plus
     /// one helping acquisition (O(H + P)), plus one raw carve (one FAA, at
@@ -170,7 +174,7 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
 
             // SAFETY: tid is a valid registered id per token contract.
             let run = unsafe {
-                runlists_acquire_run::<DefaultCas2Backend, N, C>(self, tid, class, step)
+                runlists_acquire_run::<DefaultCas2Backend, N, C, HG>(self, tid, class, step)
             };
             if !run.is_null() {
                 // SAFETY: acquire hands us exclusive ownership of `run`.

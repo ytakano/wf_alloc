@@ -33,7 +33,15 @@ risks.
    memory.
 5. **Producer-only `UnsafeCell` tail** (`spmc_span_list.rs`): mutated only
    by the unique producer per the `enqueue_by_owner` contract.
-6. **Large-run header recovery** (`large.rs`):
+6. **Huge slot claim and payload placement** (`huge.rs`): a single
+   EMPTY/FREE→ALLOCATED CAS hands the claiming thread exclusive use of
+   the slot's run; `base` is written once under the EMPTY claim and is
+   immutable afterwards. The payload pointer is derived from `base` by
+   pointer arithmetic (provenance-preserving). Deallocation recovers the
+   slot by a bounded address-range scan of the fixed directory — no
+   hidden header is read or written; double free is debug-detected via
+   the slot state.
+7. **Large-run header recovery** (`large.rs`):
    `place_large_payload` writes a `LargeAllocHeader` past the base span's
    reserve area (placement proven by `run_class_for_layout`);
    `dealloc_large_with_token_counted` reads it back at
@@ -58,8 +66,9 @@ risks.
 ## Miri status
 
 - Sequential test suites (`sequential`, `remote_free`, `exhaustion`,
-  `large_sequential`) pass under Miri with `-Zmiri-ignore-leaks` (the
-  leaks are intentional `Box::leak` test fixtures pinning the allocator).
+  `large_sequential`, `huge_sequential`) pass under Miri with
+  `-Zmiri-ignore-leaks` (the leaks are intentional `Box::leak` test
+  fixtures pinning the allocator).
 - Miri uses the `PlainCas2` backend (no asm); it is non-atomic and
   documented sequential-only.
 - Integer↔pointer casts (span masking, `HeadWord.ptr`, pool base) make

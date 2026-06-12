@@ -47,6 +47,7 @@ pub mod block;
 pub mod config;
 pub mod heap;
 pub mod help_record;
+pub mod huge;
 pub mod large;
 pub mod local_list;
 pub mod pagemap;
@@ -68,9 +69,14 @@ pub mod verify;
 pub use allocator::WfSpanAllocator;
 pub use atomic_backend::{Cas2Backend, DefaultCas2Backend};
 pub use config::{
-    HELP_BUDGET_H, LARGE_LOCAL_RUN_LIMIT_K, LOCAL_SPAN_LIMIT_K, MAX_BLOCK_SIZE,
+    DEFAULT_HUGE_GRANULE_SPANS, HELP_BUDGET_H, LARGE_LOCAL_RUN_LIMIT_K, LOCAL_SPAN_LIMIT_K,
+    MAX_BLOCK_SIZE, MAX_HUGE_GRANULES, MAX_HUGE_RUN_CLASSES, MAX_HUGE_RUNS_PER_CLASS,
     MAX_LARGE_RUN_CLASSES, MAX_LARGE_SIZE, MAX_LARGE_SPANS, MAX_SUPPORTED_CLASSES, MIN_BLOCK_SIZE,
     OWNER_NONE, OWNER_PUBLIC, SPAN_ALIGN, SPAN_SIZE,
+};
+pub use huge::{
+    HUGE_SLOT_ALLOCATED, HUGE_SLOT_EMPTY, HUGE_SLOT_FREE, HugeArena, HugeRunSlot,
+    huge_class_granules,
 };
 pub use large::{LARGE_MAGIC, LargeAllocHeader, run_class_bytes, run_class_for_layout,
     run_class_spans};
