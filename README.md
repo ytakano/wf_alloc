@@ -24,9 +24,13 @@ need.
   feature only adds test/bench harness helpers.
 - **Token-based API** plus an optional `GlobalAlloc` wrapper (`global`
   feature) with automatic per-thread registration.
-- **x86_64 only** for now: the SPMC list pop uses a versioned CAS2
-  (`lock cmpxchg16b`) to emulate strong LL/SC. Other targets are a
-  compile error (aarch64 needs CASP/LSE — future work).
+- **x86_64 and aarch64**: the SPMC list pop uses a versioned CAS2. On
+  x86_64 this is `lock cmpxchg16b`; on aarch64 it is `caspal` when built
+  with `target-feature=+lse` (strong CAS, on by default for e.g. Apple
+  Silicon targets) and a one-shot `ldaxp`/`stlxp` exclusive pair
+  otherwise. An LL/SC attempt may fail spuriously — failures route into
+  the bounded helping protocol either way, so step bounds are unchanged.
+  Other targets are a compile error.
 
 ## Quick start
 

@@ -68,13 +68,27 @@ See docs/memory-footprint.md; the paper's bound
 ## Target architecture assumptions
 
 - **x86_64 with `cmpxchg16b`** (all x86_64 CPUs of the last ~15 years):
-  versioned CAS2 emulates strong LL/SC for the SPMC head. This is the only
-  production backend currently implemented.
+  versioned CAS2 emulates strong LL/SC for the SPMC head. Failure proves
+  another thread made progress.
+- **aarch64 with FEAT_LSE** (`target-feature=+lse`, ARMv8.1+; on by
+  default for e.g. Apple Silicon targets): `caspal` is a strong CAS with
+  the same guarantees as cmpxchg16b. Selected at compile time as
+  `DefaultCas2Backend` when the feature is enabled.
+- **aarch64 baseline (LL/SC)**: one `ldaxp`/`stlxp` exclusive pair per
+  CAS2 attempt — never an internal retry loop, so the per-operation step
+  bounds hold *unconditionally*. The attempt may fail spuriously
+  (interrupt, cache-line migration), so "CAS2 failure ⇒ another thread
+  progressed" is best-effort on this backend: failures route into the
+  bounded helping protocol exactly like lost races, and an operation may
+  return null within its budget slightly more often under pathological
+  interference. The one-shot `ldaxp` load may also tear across the two
+  halves; this is safe because the loaded pair is always re-validated by
+  the versioned CAS before anything depends on its consistency (version
+  match implies the pair was genuinely current), each half is a valid
+  past value, nodes are never freed, and the verifier loads quiescently.
 - **Miri**: a plain, non-atomic `PlainCas2` backend is substituted so
   *sequential* tests run under Miri; it is not safe concurrently.
-- **aarch64** is *not* supported yet: weak LL/SC can be interrupted
-  indefinitely, so a port needs CASP/LSE or a one-word versioned-pointer
-  encoding; `atomic_backend.rs` emits a compile error on other targets.
+- Other targets: `atomic_backend.rs` emits a compile error.
 - The fixed span pool requires a caller-provided region that outlives the
   allocator; the wait-free path never calls the OS.
 

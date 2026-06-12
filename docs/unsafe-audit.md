@@ -18,11 +18,22 @@ risks.
    - help-record completion CAS (AcqRel) → `reclaim_request` SWAP (AcqRel),
    - owner claim/discard CAS/stores (AcqRel/Release/Acquire),
    - MPSC SWAP (AcqRel) and link store (Release) → consumer Acquire.
-2. **Inline asm `lock cmpxchg16b`** (`atomic_backend.rs`). 16-byte-aligned
-   operand guaranteed by `HeadWord`'s `align(16)` through `UnsafeCell`.
-   The rbx-reservation is handled with an xchg/mov pair. The atomic-load
-   trick (CAS with arbitrary expected) may issue a benign identical-value
-   store when the guess matches.
+2. **Inline asm CAS2 backends** (`atomic_backend.rs`). All operate on a
+   16-byte-aligned operand guaranteed by `HeadWord`'s `align(16)` through
+   `UnsafeCell` (also required architecturally by `ldxp`/`stxp`/`casp`).
+   - x86_64 `lock cmpxchg16b`: the rbx-reservation is handled with an
+     xchg/mov pair. The atomic-load trick (CAS with arbitrary expected)
+     may issue a benign identical-value store when the guess matches.
+   - aarch64 `caspal` (`target-feature=+lse`): strong CAS, pinned to the
+     architecturally required even/odd register pairs x4..x7; `load` uses
+     the same CAS-with-arbitrary-expected trick as x86.
+   - aarch64 `ldaxp`/`stlxp` (baseline): exactly ONE exclusive pair per
+     `compare_exchange`; failure may be spurious and its payload may be
+     torn (callers discard `Err` payloads). `load` is a bare `ldaxp` +
+     `clrex`: each half is single-copy atomic but the PAIR may tear —
+     safe because the value is always re-validated by the versioned CAS
+     before anything depends on pair consistency, or read quiescently
+     (see docs/wfspan-model.md).
 3. **Self-referential SPMC dummies** (`spmc_span_list.rs::init`,
    `WfSpanAllocator::init`). Contract: init exactly once, before sharing,
    and never move the allocator afterwards (tests/benches use
@@ -81,8 +92,12 @@ risks.
 
 ## Known residual risks
 
-- aarch64 and other targets unsupported (compile error) — see
-  docs/wfspan-model.md.
+- Targets other than x86_64 and aarch64 unsupported (compile error) —
+  see docs/wfspan-model.md.
+- On the aarch64 LL/SC backend (built without `target-feature=+lse`),
+  a CAS2 failure no longer proves another thread progressed (spurious
+  `stlxp` failure). Step bounds are unaffected; the global-progress
+  lemma is best-effort. See docs/wfspan-model.md.
 - The quiescent verifier requires external quiescence; calling it
   concurrently is a (test-harness-only) race.
 - `GlobalAlloc` wrapper: threads beyond N cannot register; their frees

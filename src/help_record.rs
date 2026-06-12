@@ -148,7 +148,9 @@ pub unsafe fn help_finishing_req<B: Cas2Backend>(
                 *list_is_null = true;
                 return;
             }
-            TryPop::Failed => return, // someone else made progress
+            // Lost the race (or spurious LL/SC failure): the caller
+            // spends budget and moves on; no retry.
+            TryPop::Failed => return,
         }
     }
 

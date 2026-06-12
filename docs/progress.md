@@ -96,10 +96,14 @@ this policy can strand temporarily.
 
 ## Backend caveat
 
-On x86_64, versioned CAS2 (`lock cmpxchg16b`) emulates strong LL/SC, so
-the one-shot pop is genuinely wait-free. On architectures with weak LL/SC
-(aarch64), an equivalent guarantee needs CASP/LSE or different encoding —
-unimplemented; compile error.
+On x86_64 (`lock cmpxchg16b`) and aarch64 with FEAT_LSE (`caspal`),
+versioned CAS2 is a strong CAS, so the one-shot pop is genuinely
+wait-free: failure proves another thread progressed. On baseline aarch64
+the backend is one `ldaxp`/`stlxp` exclusive pair per attempt — step
+bounds still hold unconditionally, but a failure may be spurious, so the
+"failure implies global progress" lemma is best-effort there (see
+docs/wfspan-model.md, Target architecture assumptions). Other targets:
+compile error.
 
 ## Loom status
 

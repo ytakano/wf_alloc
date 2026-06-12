@@ -3,8 +3,9 @@
 //! MS-queue-shaped with a dummy node: the single producer (heap owner)
 //! appends at the tail with a release store — no CAS. Consumers pop at the
 //! head with EXACTLY ONE versioned CAS2 attempt (`try_pop_head_once`);
-//! a failed attempt means another thread made progress, and starvation
-//! freedom is restored by the helping protocol, never by retrying here.
+//! a failed attempt means another thread made progress (or, on the LL/SC
+//! backend, the attempt failed spuriously); either way the caller proceeds
+//! on its bounded budget via the helping protocol, never by retrying here.
 //!
 //! Node ownership: every span carries one `SpanNode`. Enqueue consumes the
 //! span's node as the new tail; a successful pop hands the outgoing dummy
@@ -41,8 +42,8 @@ impl Default for SpanNode {
 }
 
 /// Outcome of a single pop attempt. The three cases are deliberately
-/// distinct: `Failed` (lost a race) must route the caller into the helping
-/// protocol, not into a retry loop.
+/// distinct: `Failed` (lost a race, or a spurious LL/SC failure) must
+/// route the caller into the helping protocol, not into a retry loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TryPop {
     Span(*mut SpanHeader),
