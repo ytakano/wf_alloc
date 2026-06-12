@@ -2,9 +2,11 @@
 name = "wf_alloc"
 version = "0.1.0"
 edition = "2024"
-description = "Prototype of wfspan-style wait-free dynamic memory management"
+description = "Wfspan-style wait-free dynamic memory allocator."
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+keywords = ["no_std", "wait-free", "allocator"]
+categories = ["Memory management"]
 
 [features]
 default = ["std"]
