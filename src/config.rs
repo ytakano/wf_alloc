@@ -26,15 +26,22 @@ pub const MIN_BLOCK_SIZE: usize = 16;
 /// stronger alignment) fall through to the large-object allocator.
 pub const MAX_BLOCK_SIZE: usize = SPAN_SIZE / 4;
 
-/// Smallest large-object size class (next power of two after MAX_BLOCK_SIZE).
-pub const MIN_LARGE_SIZE: usize = MAX_BLOCK_SIZE * 2; // 32 KiB
+/// Number of power-of-two large-run classes: run class `r` is a contiguous
+/// run of `2^r` spans (64 KiB, 128 KiB, …, 4 GiB). Allocations that do not
+/// fit a small size class are served by whole runs (guide Appendix A).
+pub const MAX_LARGE_RUN_CLASSES: usize = 17;
 
-/// Largest supported large-object allocation (4 GiB; requires 64-bit usize).
-pub const MAX_LARGE_SIZE: usize = 4 * 1024 * 1024 * 1024;
+/// Spans in the largest run class (2^16 spans = 4 GiB of 64 KiB spans).
+/// Part of the worst-case bound: pagemap-style loops are bounded by it.
+pub const MAX_LARGE_SPANS: usize = 1 << (MAX_LARGE_RUN_CLASSES - 1);
 
-/// Number of power-of-two large-object size classes: 32 KiB, 64 KiB, …, 4 GiB.
-pub const LARGE_CLASSES: usize =
-    MAX_LARGE_SIZE.trailing_zeros() as usize - MIN_LARGE_SIZE.trailing_zeros() as usize + 1;
+/// Largest run size in bytes (the maximum REQUEST is slightly smaller:
+/// header reserve + LargeAllocHeader + alignment slack must also fit).
+pub const MAX_LARGE_SIZE: usize = MAX_LARGE_SPANS * SPAN_SIZE;
+
+/// Maximum number of free runs a thread heap retains per run class before
+/// it publishes freed runs to its public SPMC run-list.
+pub const LARGE_LOCAL_RUN_LIMIT_K: usize = 8;
 
 /// Bytes reserved at the start of every span for the `SpanHeader`.
 pub const SPAN_HEADER_RESERVE: usize = 1024;
@@ -57,3 +64,7 @@ const _: () = assert!(SPAN_SIZE.is_power_of_two());
 const _: () = assert!(MIN_BLOCK_SIZE.is_power_of_two());
 const _: () = assert!(MAX_BLOCK_SIZE.is_power_of_two());
 const _: () = assert!(MIN_BLOCK_SIZE >= core::mem::size_of::<usize>() * 2);
+const _: () = assert!(MAX_LARGE_RUN_CLASSES >= 1);
+const _: () = assert!(LARGE_LOCAL_RUN_LIMIT_K >= 1);
+// MAX_LARGE_SIZE (4 GiB) requires a 64-bit usize.
+const _: () = assert!(usize::BITS >= 64);

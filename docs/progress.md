@@ -14,6 +14,10 @@ constraints and shows where each is enforced.
 | allocation | bounded by `spanlists_acquire_span` + K-bounded rotation | `allocator.rs::alloc_with_token_counted` |
 | deallocation | O(1): local push, or SWAP + link + FAA + ≤ 1 CAS | `allocator.rs::dealloc_local/dealloc_remote` |
 | raw span acquisition | O(1): one FAA | `pagemap.rs` |
+| raw run acquisition | O(1): one FAA + ≤ 1 rollback CAS (never retried) | `pagemap.rs::acquire_raw_run` |
+| `runlists_acquire_run` | O(N²) with H = 1, P = N (same shared core) | `acquire.rs::acquire_from_lists` |
+| large allocation | O(R · N²): ≤ R = MAX_LARGE_RUN_CLASSES class steps, each ≤ one acquire; one carve | `large.rs::alloc_large_with_token_counted` |
+| large deallocation | O(1): header read + owner store + one push or one publish | `large.rs::dealloc_large_with_token_counted` |
 | remote-chain absorption | ≤ blocks_per_span per span | `remote_mpsc.rs::append_remote_to_local_bounded` |
 
 The paper's alternative wfqueue-style protocol with an O(N) bound is not
@@ -30,7 +34,19 @@ Only loops statically bounded by one of: `N`, `C`, `P`, `H`, `K`,
 - querying: `while help_query < N`
 - span init / remote absorption: `for _ in 0..block_count`
 - `remove_bounded`: `for _ in 0..limit` (limit = current list length)
-- allocator init: `N × C`
+- allocator init: `N × (C + MAX_LARGE_RUN_CLASSES)`
+- large class search: `for class in min_class..MAX_LARGE_RUN_CLASSES`
+
+## Large-path exhaustion semantics
+
+`acquire_raw_run` keeps wait-freedom at exhaustion by NOT retrying: the
+multi-span FAA may overshoot `next`, and a single rollback CAS tries to
+hand the tail back. If that CAS loses, fewer than `2^min_class` trailing
+spans are permanently skipped (bounded, one-shot waste per exhaustion
+race); carved spans and runs keep recirculating through their lists, so
+no live memory is lost. Fresh carving is attempted only at the exact
+class — after a `2^k`-span carve fails, any larger carve must fail too,
+so escalated classes use only list reuse (Policy 1).
 
 ## Forbidden patterns (checked in review, guarded by StepCounter)
 
@@ -47,8 +63,11 @@ Only loops statically bounded by one of: `N`, `C`, `P`, `H`, `K`,
 
 Every public alloc/dealloc path updates a `StepCounter`;
 `StepCounter::assert_bounds(N, H, P, blocks_per_span, K)` is asserted per
-operation in the concurrent smoke tests and the WCET-style bench. This is
-an empirical guardrail against accidental unbounded loops, not a proof.
+operation in the concurrent smoke tests and the WCET-style bench, and
+`StepCounter::assert_large_bounds(N, H, P, R)` per large operation in the
+large test suites (including under contention, where the removed
+Treiber-stack implementation would have spun). This is an empirical
+guardrail against accidental unbounded loops, not a proof.
 
 ## Failure (null) semantics
 

@@ -14,10 +14,9 @@ use core::sync::atomic::Ordering;
 use crate::acquire::spanlists_acquire_span;
 use crate::atomic_backend::DefaultCas2Backend;
 use crate::block::{Block, block_from_payload};
-use crate::config::{LOCAL_SPAN_LIMIT_K, OWNER_NONE, OWNER_PUBLIC, SPAN_SIZE};
+use crate::config::{LOCAL_SPAN_LIMIT_K, OWNER_NONE, OWNER_PUBLIC};
 use crate::heap::ThreadHeap;
 use crate::help_record::HelpTable;
-use crate::large::LargePool;
 use crate::pagemap::FixedSpanPool;
 use crate::size_class::{class_to_size, size_to_class};
 use crate::span::{
@@ -45,7 +44,6 @@ pub struct WfSpanAllocator<const N: usize, const C: usize> {
     pub pool: FixedSpanPool,
     pub registry: ThreadRegistry,
     pub stats: AllocatorStats,
-    pub large_pool: LargePool,
 }
 
 impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
@@ -60,7 +58,6 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
             pool: FixedSpanPool::new(),
             registry: ThreadRegistry::new(N),
             stats: AllocatorStats::new(),
-            large_pool: LargePool::new(),
         }
     }
 
@@ -86,45 +83,19 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
     /// # }
     /// ```
     pub unsafe fn init(&self, region: *mut u8, len: usize) {
-        // Bounded loops: N * C.
+        // Bounded loops: N * (C + MAX_LARGE_RUN_CLASSES).
         for heap in &self.heaps {
             for list in &heap.public_spans {
+                // SAFETY: pre-share, called once per contract.
+                unsafe { list.init() };
+            }
+            for list in &heap.public_runs {
                 // SAFETY: pre-share, called once per contract.
                 unsafe { list.init() };
             }
         }
         // SAFETY: forwarded contract.
         unsafe { self.pool.set_region(region, len) };
-    }
-
-    /// Install a backing memory region for large-object allocations (> MAX_BLOCK_SIZE).
-    ///
-    /// Call this once after [`init`](Self::init) if large allocations are needed;
-    /// without it large requests return null.
-    ///
-    /// # Safety
-    /// `region`/`len`: see [`FixedSpanPool::set_region`].  The region must not
-    /// overlap the small-object region passed to `init`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[cfg(feature = "std")] {
-    /// use wf_alloc::WfSpanAllocator;
-    /// use wf_alloc::region::OwnedRegion;
-    ///
-    /// let small_region = OwnedRegion::new(16);
-    /// let large_region = OwnedRegion::new(64); // 64 × 64 KiB = 4 MiB for large objects
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4, 8>::new()));
-    /// unsafe {
-    ///     alloc.init(small_region.ptr(), small_region.len());
-    ///     alloc.init_large(large_region.ptr(), large_region.len());
-    /// }
-    /// # }
-    /// ```
-    pub unsafe fn init_large(&self, region: *mut u8, len: usize) {
-        // SAFETY: forwarded contract.
-        unsafe { self.large_pool.set_region(region, len) };
     }
 
     /// Register the calling thread; None after N registrations.
@@ -165,6 +136,18 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
     /// ```
     pub const fn theoretical_extra_bound() -> usize {
         theoretical_extra_bound(N, C, crate::config::SPAN_SIZE, N)
+    }
+
+    /// Small-vs-large dispatch predicate: the size class if `layout` fits
+    /// the small path, `None` for the large-run path. A pure function of
+    /// `Layout`, used identically by alloc and dealloc so each pointer is
+    /// freed on the path that allocated it.
+    #[inline]
+    fn small_class(layout: Layout) -> Option<usize> {
+        match size_to_class(layout.size(), layout.align()) {
+            Some(c) if c < C => Some(c),
+            _ => None,
+        }
     }
 
     /// Allocate; returns null on unsupported layout or pool exhaustion.
@@ -231,10 +214,12 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
         token: ThreadToken,
         step: &mut StepCounter,
     ) -> *mut u8 {
-        // Dispatch oversized or over-aligned requests to the large-object path.
-        let class = match size_to_class(layout.size(), layout.align()) {
-            Some(c) if c < C => c,
-            _ => return unsafe { self.large_pool.alloc(layout) },
+        // Dispatch oversized or over-aligned requests to the large-run path.
+        // The SAME pure-Layout predicate is used in dealloc, so a pointer
+        // allocated here is always freed on the matching path.
+        let Some(class) = Self::small_class(layout) else {
+            // SAFETY: forwarded contract.
+            return unsafe { self.alloc_large_with_token_counted(layout, token, step) };
         };
         let tid = token.id;
         debug_assert!(tid < N);
@@ -358,22 +343,21 @@ impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
     pub unsafe fn dealloc_with_token_counted(
         &self,
         ptr: *mut u8,
-        _layout: Layout,
+        layout: Layout,
         token: ThreadToken,
         step: &mut StepCounter,
     ) {
         if ptr.is_null() {
             return;
         }
-        // Detect large objects by checking whether the pointer falls outside the
-        // small-object span pool's address range.
-        let addr = ptr as usize;
-        let pool_base = self.pool.base_addr();
-        let pool_end = pool_base + self.pool.spans_total() * SPAN_SIZE;
-        if !(addr >= pool_base && addr < pool_end) {
-            // SAFETY: ptr was returned by large_pool.alloc and is not yet freed.
-            unsafe { self.large_pool.dealloc(ptr) };
-            return;
+        // Dispatch by Layout, with the same predicate as in alloc. This
+        // guarantees span_from_ptr (SPAN_SIZE masking) is never applied to a
+        // large payload, whose masked address could be a headerless interior
+        // span of a run. Relies on the GlobalAlloc-style contract that
+        // dealloc receives the same Layout the pointer was allocated with.
+        if Self::small_class(layout).is_none() {
+            // SAFETY: ptr came from the large path (same predicate at alloc).
+            return unsafe { self.dealloc_large_with_token_counted(ptr, layout, token, step) };
         }
         let span = span_from_ptr(ptr);
         let block = block_from_payload(ptr);

@@ -3,6 +3,7 @@
 
 use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
+use crate::config::MAX_LARGE_RUN_CLASSES;
 use crate::span::SpanHeader;
 use crate::spmc_span_list::SpmcSpanList;
 
@@ -129,12 +130,23 @@ impl Default for LocalSpanList {
 }
 
 /// One thread's heap: for each size class, a private local span-list, a
-/// public SPMC span-list, and saved acquire positions.
+/// public SPMC span-list, and saved acquire positions; plus the same set of
+/// lanes for each large-run class.
+///
+/// The run lanes are fixed-size (`MAX_LARGE_RUN_CLASSES` is a crate const,
+/// not a const generic) because stable Rust cannot express `[_; C + R]`.
+/// `LocalSpanList`/`SpmcSpanList` operate on `SpanHeader` pointers, and a
+/// run's base span carries a `SpanHeader` (see `span::init_run`), so the
+/// same list types serve both lanes.
 pub struct ThreadHeap<const C: usize> {
     pub local_spans: [LocalSpanList; C],
     pub public_spans: [SpmcSpanList; C],
     pub cur_query: [AtomicUsize; C],
     pub helping_pos: [AtomicUsize; C],
+    pub local_runs: [LocalSpanList; MAX_LARGE_RUN_CLASSES],
+    pub public_runs: [SpmcSpanList; MAX_LARGE_RUN_CLASSES],
+    pub cur_query_runs: [AtomicUsize; MAX_LARGE_RUN_CLASSES],
+    pub helping_pos_runs: [AtomicUsize; MAX_LARGE_RUN_CLASSES],
 }
 
 impl<const C: usize> ThreadHeap<C> {
@@ -144,6 +156,10 @@ impl<const C: usize> ThreadHeap<C> {
             public_spans: [const { SpmcSpanList::new() }; C],
             cur_query: [const { AtomicUsize::new(0) }; C],
             helping_pos: [const { AtomicUsize::new(0) }; C],
+            local_runs: [const { LocalSpanList::new() }; MAX_LARGE_RUN_CLASSES],
+            public_runs: [const { SpmcSpanList::new() }; MAX_LARGE_RUN_CLASSES],
+            cur_query_runs: [const { AtomicUsize::new(0) }; MAX_LARGE_RUN_CLASSES],
+            helping_pos_runs: [const { AtomicUsize::new(0) }; MAX_LARGE_RUN_CLASSES],
         }
     }
 }

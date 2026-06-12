@@ -16,6 +16,8 @@ pub struct StepCounter {
     pub help_steps: usize,
     pub query_steps: usize,
     pub blocks_scanned: usize,
+    /// Run classes examined by one large allocation (≤ MAX_LARGE_RUN_CLASSES).
+    pub large_class_steps: usize,
 }
 
 impl StepCounter {
@@ -81,6 +83,53 @@ impl StepCounter {
             self.blocks_scanned
         );
     }
+
+    /// Assert the per-operation bounds of the LARGE path (one
+    /// `alloc_large`/`dealloc_large`). `n` = max threads, `h` = helping
+    /// budget, `p` = query limit (= n), `r` = MAX_LARGE_RUN_CLASSES.
+    ///
+    /// One large allocation examines at most `r` run classes; each class
+    /// runs at most one bounded helping acquisition (same per-call bounds as
+    /// `assert_bounds`), and at most one raw carve (one FAA + one rollback
+    /// CAS) happens per allocation. Deallocation is O(1).
+    pub fn assert_large_bounds(&self, n: usize, h: usize, p: usize, r: usize) {
+        assert!(
+            self.large_class_steps <= r,
+            "large_class_steps {} exceeds bound",
+            self.large_class_steps
+        );
+        assert!(
+            self.help_steps <= r * (h * n + p + 1),
+            "help_steps {} exceeds large bound",
+            self.help_steps
+        );
+        assert!(
+            self.query_steps <= r * (p + n + 1),
+            "query_steps {} exceeds large bound",
+            self.query_steps
+        );
+        // One CAS2 per help/query step at most.
+        assert!(
+            self.cas2_attempts <= self.help_steps + self.query_steps + 2 * r,
+            "cas2_attempts {} exceeds large bound",
+            self.cas2_attempts
+        );
+        // CAS: one per help/query step (help record CAS), one clear per
+        // acquisition, plus one carve rollback.
+        assert!(
+            self.cas_attempts <= self.help_steps + self.query_steps + 2 * r + 1,
+            "cas_attempts {} exceeds large bound",
+            self.cas_attempts
+        );
+        // FAA: one raw carve per allocation (+ slack for stats-free paths).
+        assert!(
+            self.faa_ops <= r + 2,
+            "faa_ops {} exceeds large bound",
+            self.faa_ops
+        );
+        // The large path never scans blocks.
+        assert_eq!(self.blocks_scanned, 0, "large path scanned blocks");
+    }
 }
 
 /// Allocator-wide monotonic event counters (Relaxed; advisory).
@@ -102,6 +151,16 @@ pub struct AllocatorStats {
     /// Times remote-list consumption stopped at an UNLINKED link
     /// (span temporarily blocked by a stalled producer).
     pub remote_blocked_events: AtomicUsize,
+    /// Raw runs carved from the fixed pool (large path).
+    pub allocated_runs: AtomicUsize,
+    /// Freed runs published to a public SPMC run-list.
+    pub published_runs: AtomicUsize,
+    /// Runs acquired from public SPMC run-lists (incl. via help records).
+    pub acquired_public_runs: AtomicUsize,
+    /// Runs stashed in a run HelpRecord (one-request-two-runs case).
+    pub run_help_record_runs: AtomicUsize,
+    /// Runs reclaimed from a run HelpRecord on a later acquisition.
+    pub run_help_record_reclaimed: AtomicUsize,
 }
 
 impl AllocatorStats {
@@ -115,6 +174,11 @@ impl AllocatorStats {
             help_record_spans: AtomicUsize::new(0),
             help_record_reclaimed: AtomicUsize::new(0),
             remote_blocked_events: AtomicUsize::new(0),
+            allocated_runs: AtomicUsize::new(0),
+            published_runs: AtomicUsize::new(0),
+            acquired_public_runs: AtomicUsize::new(0),
+            run_help_record_runs: AtomicUsize::new(0),
+            run_help_record_reclaimed: AtomicUsize::new(0),
         }
     }
 

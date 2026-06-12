@@ -59,6 +59,35 @@ local ones online.
   a successful pop hands the outgoing dummy to the popped span. Nodes are
   never freed.
 
+## LargeRun invariants (guide Appendix A, Policy 1)
+
+- A run is `2^run_class` contiguous spans carved from the same pool as
+  small spans; its base span carries a `SpanHeader` (`init_run`) with
+  `size_class = run_class`, `block_count = span_count`. Interior spans
+  carry NO header and are never walked.
+- After `init_run`, the run class never changes (Policy 1: no splitting,
+  no coalescing). A freed run returns to a list of its OWN class.
+- A run is either allocated (`RunAllocated`, in no list) or free
+  (`RunFreeLocal` in exactly one local run-list, or `RunFreePublic` in
+  one public run-list / run help record) — never both, never in two lists.
+- An allocated run has a valid `LargeAllocHeader` (magic, run pointer,
+  run class) immediately before the payload; `header.run` points to the
+  base span.
+- No run overlaps a small span or another run (page-occupancy check in
+  the verifier).
+- Runs never use the per-block machinery: local free-list empty,
+  `remote.free_count == 0`, no `OWNER_NONE`/`try_discard`/remote MPSC.
+  Cross-thread free transfers the WHOLE run to the freeing thread.
+
+## Dispatch invariant (single region)
+
+- Small-vs-large dispatch is a pure function of `Layout`
+  (`size_to_class` yields a class `< C` → small), applied identically in
+  alloc and dealloc. Hence `span_from_ptr` (SPAN_SIZE masking) is never
+  applied to a large payload, whose masked address could be a headerless
+  interior span of a run. This relies on the GlobalAlloc-style contract
+  that dealloc receives the Layout the pointer was allocated with.
+
 ## MPSC invariants
 
 - Push is SWAP then link; `UNLINKED` is a valid temporary `next`.

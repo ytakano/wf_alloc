@@ -28,10 +28,21 @@ risks.
    and never move the allocator afterwards (tests/benches use
    `Box::leak`). A `Pin`-based constructor would make this typed; future
    work.
-4. **In-place header construction** (`span.rs::init_span`) via
-   `ptr::write` into exclusively owned raw memory.
+4. **In-place header construction** (`span.rs::init_span`,
+   `span.rs::init_run`) via `ptr::write` into exclusively owned raw
+   memory.
 5. **Producer-only `UnsafeCell` tail** (`spmc_span_list.rs`): mutated only
    by the unique producer per the `enqueue_by_owner` contract.
+6. **Large-run header recovery** (`large.rs`):
+   `place_large_payload` writes a `LargeAllocHeader` past the base span's
+   reserve area (placement proven by `run_class_for_layout`);
+   `dealloc_large_with_token_counted` reads it back at
+   `ptr - size_of::<LargeAllocHeader>()`. Soundness rests on the dispatch
+   invariant (docs/invariants.md): the Layout passed to dealloc routes
+   every large pointer back to the large path, and the magic field is
+   debug-asserted. `alloc_large_with_token_counted` relies on exclusive
+   run ownership handed over by the local list pop, the helping acquire
+   (release/acquire via the SPMC list), or the raw carve.
 
 ## Caller-facing contracts
 
@@ -46,9 +57,9 @@ risks.
 
 ## Miri status
 
-- Sequential test suites (`sequential`, `remote_free`, `exhaustion`) pass
-  under Miri with `-Zmiri-ignore-leaks` (the leaks are intentional
-  `Box::leak` test fixtures pinning the allocator).
+- Sequential test suites (`sequential`, `remote_free`, `exhaustion`,
+  `large_sequential`) pass under Miri with `-Zmiri-ignore-leaks` (the
+  leaks are intentional `Box::leak` test fixtures pinning the allocator).
 - Miri uses the `PlainCas2` backend (no asm); it is non-atomic and
   documented sequential-only.
 - Integer↔pointer casts (span masking, `HeadWord.ptr`, pool base) make

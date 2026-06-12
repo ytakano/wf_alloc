@@ -54,6 +54,41 @@ impl FixedSpanPool {
         (self.base.load(Ordering::Relaxed) + i * SPAN_SIZE) as *mut u8
     }
 
+    /// Take `span_count` contiguous raw spans (for a large run). Wait-free:
+    /// one FAA plus AT MOST ONE rollback CAS attempt (never retried). Null
+    /// on exhaustion.
+    ///
+    /// Exhaustion semantics: a failed multi-span FAA overshoots `next`; the
+    /// single `compare_exchange` tries to hand the tail back. If that CAS
+    /// loses (another thread carved meanwhile), the remaining tail — fewer
+    /// than `span_count` spans — is permanently skipped. This waste is
+    /// bounded by one run of the largest requested class per exhaustion
+    /// race; freed spans and runs still recirculate through the span/run
+    /// lists, so no already-carved memory is ever lost.
+    pub fn acquire_raw_run(&self, span_count: usize, step: &mut StepCounter) -> *mut u8 {
+        debug_assert!(span_count >= 1);
+        // Cheap pre-check: avoid pointlessly poisoning `next` when the
+        // request can never fit (or the pool is uninitialized).
+        if span_count > self.count.load(Ordering::Relaxed) {
+            return core::ptr::null_mut();
+        }
+        step.faa_ops += 1;
+        let i = self.next.fetch_add(span_count, Ordering::Relaxed);
+        let count = self.count.load(Ordering::Relaxed);
+        if i >= count || count - i < span_count {
+            // Single rollback attempt; losing it is acceptable bounded waste.
+            step.cas_attempts += 1;
+            let _ = self.next.compare_exchange(
+                i + span_count,
+                i,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
+            return core::ptr::null_mut();
+        }
+        (self.base.load(Ordering::Relaxed) + i * SPAN_SIZE) as *mut u8
+    }
+
     /// Total spans in the region.
     pub fn spans_total(&self) -> usize {
         self.count.load(Ordering::Relaxed)

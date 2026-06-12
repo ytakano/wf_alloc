@@ -1620,7 +1620,7 @@ Deliver:
 size_to_class
 class_to_size
 alignment handling
-unsupported large allocation handling
+large allocation dispatch to the LargeRun allocator
 ```
 
 ### Milestone 3: MPSC remote free-list
@@ -1848,7 +1848,7 @@ free all blocks and allocate again
 span_from_ptr works
 all size classes work
 alignment handling works
-unsupported large allocation returns null/error
+large allocation uses the LargeRun path; only requests above MAX_LARGE_SPANS return null/error
 ```
 
 ### 20.2 Remote free-list tests
@@ -2125,7 +2125,7 @@ Production readiness would require more work:
 formal progress review
 architecture-specific atomic validation
 robust GlobalAlloc integration
-large allocation support
+large allocation support through LargeRun classes
 OS page backend
 realloc
 hardening against misuse
@@ -2181,3 +2181,530 @@ and:
 wfspan.
 ```
 
+---
+
+# Appendix A: Large Allocation Extension
+
+This appendix modifies the prototype roadmap so that wfspan-style allocation can support objects larger than a single span while preserving a bounded-step design.
+
+The original small-object path manages one fixed-size span at a time. A span is split into same-size blocks and uses a local free-list plus a per-span MPSC remote free-list. This is a good fit for small objects, but it is awkward for objects larger than one span because one allocation must reserve multiple contiguous spans and must be freed as one unit.
+
+The large-object extension therefore introduces a second path:
+
+```text
+small allocation:
+  size < LARGE_THRESHOLD
+  allocate one block from a small-object span
+
+large allocation:
+  size >= LARGE_THRESHOLD
+  allocate a contiguous run of one or more spans
+```
+
+The large path does not split a run into small blocks. The whole run belongs to exactly one allocation.
+
+## A.1 Design goals
+
+The large allocation path must satisfy these constraints:
+
+```text
+- no unbounded CAS retry loops
+- no global lock
+- no OS syscall on the wait-free path
+- no unbounded search for contiguous spans
+- bounded allocation steps
+- bounded deallocation steps
+- pointer-to-run metadata lookup must be bounded
+- large deallocation must not use per-block remote free-lists
+```
+
+The key tradeoff is internal fragmentation: the allocator may return a larger run than requested so that allocation can remain class-based and bounded.
+
+## A.2 LargeRun model
+
+A LargeRun is a contiguous sequence of spans.
+
+```text
+LargeRun
+  base_span_index: index of the first span
+  span_count: number of spans in this run
+  run_class: power-of-two run class
+  owner: current owner thread or OWNER_NONE
+  state: FREE or ALLOCATED
+  requested_size: user-requested size
+  requested_align: user-requested alignment
+```
+
+Run classes are power-of-two numbers of spans:
+
+```text
+run class 0: 1 span
+run class 1: 2 spans
+run class 2: 4 spans
+run class 3: 8 spans
+...
+run class R: 2^R spans
+```
+
+The run size in bytes is:
+
+```text
+run_size_bytes(class) = SPAN_SIZE * (1 << class)
+```
+
+For an allocation request:
+
+```text
+needed = size + header_size + alignment_slack
+needed_spans = ceil(needed / SPAN_SIZE)
+run_class = ceil_log2(needed_spans)
+```
+
+The allocator may choose a larger run class if the exact class is unavailable. This choice is bounded by `MAX_LARGE_RUN_CLASSES`.
+
+## A.3 New constants
+
+Add these configuration constants:
+
+```rust
+pub const LARGE_THRESHOLD: usize = SPAN_SIZE;
+pub const MAX_LARGE_RUN_CLASSES: usize = 16;
+pub const MAX_LARGE_SPANS: usize = 1 << (MAX_LARGE_RUN_CLASSES - 1);
+pub const LARGE_LOCAL_RUN_LIMIT_K: usize = 8;
+```
+
+For real-time use, `MAX_LARGE_SPANS` must be configured carefully. It becomes part of the worst-case bound.
+
+## A.4 Metadata
+
+Large allocation needs metadata that can be recovered from the returned pointer.
+
+Use a hidden header directly before the returned payload:
+
+```rust
+#[repr(C)]
+pub struct LargeAllocHeader {
+    magic: u64,
+    base: *mut LargeRunHeader,
+    run_class: u16,
+    span_count: u32,
+    requested_size: usize,
+    requested_align: usize,
+}
+```
+
+The returned pointer is aligned according to the requested `Layout`:
+
+```text
+run_base + padding + LargeAllocHeader + payload
+```
+
+The header is placed immediately before the payload:
+
+```text
+payload_ptr - size_of::<LargeAllocHeader>()
+```
+
+This supports alignments larger than `SPAN_SIZE` as long as the chosen run has enough slack.
+
+## A.5 Flat pagemap
+
+The paper already mentions that large allocations use power-of-two size classes and maintain metadata in a flat pagemap keyed by span index. The Rust implementation should make this explicit.
+
+Add a preallocated pagemap:
+
+```rust
+pub enum PageKind {
+    Free,
+    SmallSpan,
+    LargeRun,
+}
+
+#[repr(C)]
+pub struct PageMapEntry {
+    encoded: AtomicUsize,
+}
+```
+
+Recommended encoding:
+
+```text
+bits 0..2: PageKind
+remaining bits: base span index or pointer to LargeRunHeader
+```
+
+For the simplest prototype, fill every span entry in the run with the same base-run metadata. This makes deallocation and validation simple:
+
+```text
+for i in 0..span_count:
+  pagemap[base_span_index + i] = LargeRun(base_span_index)
+```
+
+This loop is bounded by `MAX_LARGE_SPANS`. For stricter WCET, use a smaller `MAX_LARGE_SPANS` or use a two-level metadata design.
+
+## A.6 LargeRun lists
+
+Do not reuse the small-object per-span MPSC remote free-list for large allocations. A large allocation is a whole run, so remote freeing individual blocks does not exist.
+
+Each thread heap gets large-run lists:
+
+```rust
+pub struct ThreadHeap<const C: usize, const R: usize> {
+    small_local_spans: [LocalSpanList; C],
+    small_public_spans: [SpmcSpanList; C],
+
+    large_local_runs: [LocalRunList; R],
+    large_public_runs: [SpmcRunList; R],
+
+    cur_query_small: [AtomicUsize; C],
+    helping_pos_small: [AtomicUsize; C],
+
+    cur_query_large: [AtomicUsize; R],
+    helping_pos_large: [AtomicUsize; R],
+}
+```
+
+`SpmcRunList` is the same algorithmic structure as `SpmcSpanList`, but it stores run nodes instead of span nodes.
+
+```rust
+pub struct RunNode {
+    next: AtomicPtr<RunNode>,
+    run: *mut LargeRunHeader,
+}
+
+pub struct SpmcRunList {
+    head: UnsafeCell<HeadWord>,
+    tail: UnsafeCell<*mut RunNode>,
+}
+```
+
+The same one-shot pop rule applies:
+
+```text
+try_pop_run_head_once performs at most one CAS2/LLSC attempt.
+No retry loop is allowed.
+```
+
+## A.7 Large allocation algorithm
+
+```rust
+pub unsafe fn alloc_large_with_token<const N: usize, const R: usize>(
+    alloc: &WfSpanAllocator<N, R>,
+    layout: Layout,
+    token: ThreadToken,
+    step: &mut StepCounter,
+) -> *mut u8 {
+    let header_size = core::mem::size_of::<LargeAllocHeader>();
+    let align = layout.align().max(core::mem::align_of::<LargeAllocHeader>());
+
+    let needed = layout
+        .size()
+        .checked_add(header_size)
+        .and_then(|x| x.checked_add(align - 1))
+        .unwrap_or(usize::MAX);
+
+    let needed_spans = ceil_div(needed, SPAN_SIZE);
+    if needed_spans == 0 || needed_spans > MAX_LARGE_SPANS {
+        return core::ptr::null_mut();
+    }
+
+    let min_class = ceil_log2(needed_spans);
+
+    // Bounded search over run classes.
+    for class in min_class..MAX_LARGE_RUN_CLASSES {
+        let run = acquire_large_run_class_or_larger::<N, R>(alloc, class, token, step);
+        if run.is_null() {
+            continue;
+        }
+
+        let usable_run = split_large_run_bounded(alloc, run, class, min_class, token, step);
+        let payload = place_large_header_and_payload(usable_run, layout, token);
+        publish_large_pagemap_entries(alloc, usable_run, step);
+        return payload;
+    }
+
+    core::ptr::null_mut()
+}
+```
+
+The loop over classes is bounded by `MAX_LARGE_RUN_CLASSES`.
+
+## A.8 Large run acquisition
+
+Large runs use the same helping idea as span acquisition:
+
+```text
+1. Check this thread's local large-run list for the requested class.
+2. If local list is empty, publish a HelpRecord for this run class.
+3. Help up to H pending requests.
+4. Query up to P public run-lists.
+5. Finish or clear the thread's own request.
+6. Return null if no run is available.
+```
+
+The function shape mirrors `spanlists_acquire_span`:
+
+```rust
+unsafe fn runlists_acquire_run<
+    B: Cas2Backend,
+    const N: usize,
+    const R: usize,
+>(
+    alloc: &WfSpanAllocator<N, R>,
+    heap_id: usize,
+    run_class: usize,
+    step: &mut StepCounter,
+) -> *mut LargeRunHeader;
+```
+
+Progress bound:
+
+```text
+runlists_acquire_run: O(N^2)
+alloc_large exact-class: O(N^2 + MAX_LARGE_SPANS)
+alloc_large with upward class search: O(MAX_LARGE_RUN_CLASSES * N^2 + MAX_LARGE_SPANS)
+dealloc_large: O(1) or O(MAX_LARGE_RUN_CLASSES) if local-list trimming is done immediately
+```
+
+`MAX_LARGE_RUN_CLASSES` and `MAX_LARGE_SPANS` are compile-time or configuration-time constants, so the path remains bounded.
+
+## A.9 Splitting policy
+
+There are two valid policies.
+
+### Policy 1: allocate the whole larger run
+
+If class `k` is requested and only class `j > k` is available, allocate the whole class-`j` run.
+
+Advantages:
+
+```text
+- very simple
+- no splitting metadata
+- bounded O(1) after acquisition
+```
+
+Disadvantages:
+
+```text
+- higher internal fragmentation
+```
+
+### Policy 2: bounded non-coalescing split
+
+If class `j` is acquired for a class-`k` request, split it down to class `k` and return leftover buddies to local run lists.
+
+```rust
+unsafe fn split_large_run_bounded(
+    alloc: &Allocator,
+    run: *mut LargeRunHeader,
+    from_class: usize,
+    to_class: usize,
+    token: ThreadToken,
+    step: &mut StepCounter,
+) -> *mut LargeRunHeader {
+    let current = run;
+    for class in ((to_class + 1)..=from_class).rev() {
+        let buddy = split_off_upper_half(current, class);
+        alloc.heaps[token.id].large_local_runs[class - 1].push(buddy);
+        step.large_split_steps += 1;
+    }
+    current
+}
+```
+
+Do not coalesce in the real-time deallocation path. Coalescing is useful, but it introduces multi-run state transitions and complicated synchronization. If coalescing is required, do it in a non-real-time maintenance path with a bounded budget.
+
+## A.10 Large deallocation algorithm
+
+Large deallocation is simpler than small deallocation because the whole run is returned at once.
+
+```rust
+pub unsafe fn dealloc_large_with_token<const N: usize, const R: usize>(
+    alloc: &WfSpanAllocator<N, R>,
+    ptr: *mut u8,
+    layout: Layout,
+    token: ThreadToken,
+    step: &mut StepCounter,
+) {
+    let hdr = (ptr as *mut u8).sub(core::mem::size_of::<LargeAllocHeader>())
+        as *mut LargeAllocHeader;
+
+    debug_assert_eq!((*hdr).magic, LARGE_MAGIC);
+
+    let run = (*hdr).base;
+    let old = (*run).state.swap(RUN_FREE, Ordering::AcqRel);
+    debug_assert_eq!(old, RUN_ALLOCATED);
+
+    (*run).owner.store(token.id, Ordering::Release);
+
+    // Optional in strict mode: do not clear all pagemap entries here.
+    // The header state is enough to reject double-free in debug mode.
+    alloc.heaps[token.id]
+        .large_local_runs[(*hdr).run_class as usize]
+        .push(run);
+
+    trim_large_local_runs_bounded(alloc, token, step);
+}
+```
+
+The deallocating thread becomes the owner of the freed run. This avoids a remote free-list for large allocations and keeps deallocation bounded.
+
+## A.11 Dispatch from alloc/dealloc
+
+Modify the public allocator entry points:
+
+```rust
+pub unsafe fn alloc_with_token(
+    &self,
+    layout: Layout,
+    token: ThreadToken,
+) -> *mut u8 {
+    if is_large_layout(layout) {
+        self.alloc_large_with_token(layout, token)
+    } else {
+        self.alloc_small_with_token(layout, token)
+    }
+}
+```
+
+For deallocation, use the hidden large header or pagemap classification.
+
+Recommended dispatch:
+
+```rust
+pub unsafe fn dealloc_with_token(
+    &self,
+    ptr: *mut u8,
+    layout: Layout,
+    token: ThreadToken,
+) {
+    if is_large_layout(layout) {
+        self.dealloc_large_with_token(ptr, layout, token)
+    } else {
+        self.dealloc_small_with_token(ptr, layout, token)
+    }
+}
+```
+
+For `GlobalAlloc`, the caller provides the original `Layout`, so this split is valid.
+
+## A.12 OS fallback mode
+
+For real-time mode, do not call the OS in the allocation path.
+
+```text
+rt_fixed mode:
+  all spans/runs are pre-provisioned at initialization
+  exhaustion returns null
+  wait-free bound is preserved
+
+std_os_fallback mode:
+  if no run is available, call mmap/VirtualAlloc/system allocator
+  not wait-free
+  useful for development and non-real-time users
+```
+
+The coding agent must keep these modes separate. Do not silently enable OS fallback in the wait-free core.
+
+## A.13 Updated invariants
+
+Add these invariants:
+
+```text
+A LargeRun is either FREE or ALLOCATED, never both.
+A LargeRun belongs to exactly one run class.
+A LargeRun appears in at most one large-run list.
+An allocated LargeRun appears in no free run-list.
+The returned payload pointer has a valid LargeAllocHeader immediately before it.
+LargeAllocHeader.base points to the base LargeRunHeader.
+All pagemap entries for a large run either map to that run or are documented as lazily stale.
+No small-object span overlaps with a LargeRun.
+No LargeRun overlaps with another LargeRun.
+A split run's buddies must be aligned to their run size.
+Coalescing is not performed in the bounded deallocation path.
+```
+
+## A.14 Updated implementation order
+
+Insert these milestones after the small-object allocator works and before `GlobalAlloc`:
+
+```text
+Milestone L1: LargeRun metadata and size classes
+  - LargeRunHeader
+  - LargeAllocHeader
+  - run_class_for_layout
+  - payload/header placement
+
+Milestone L2: flat pagemap
+  - PageMapEntry
+  - span_index
+  - map_large_run
+  - lookup_large_run
+
+Milestone L3: SPMC run-list
+  - SpmcRunList
+  - try_pop_run_head_once
+  - run HelpRecord table
+  - runlists_acquire_run
+
+Milestone L4: large allocation/deallocation
+  - alloc_large_with_token
+  - dealloc_large_with_token
+  - local run caches
+  - public run-list publishing
+
+Milestone L5: bounded split policy
+  - whole-larger-run mode first
+  - optional non-coalescing split
+  - no coalescing in RT path
+
+Milestone L6: tests and benchmarks
+  - exact threshold boundary
+  - 1-span, 2-span, 4-span large requests
+  - align > SPAN_SIZE
+  - mixed small and large allocations
+  - remote-thread large deallocation
+  - exhaustion returns null
+  - no duplicate run allocation under contention
+  - StepCounter bounds
+```
+
+## A.15 Agent prompt patch
+
+Add this to the coding-agent prompt:
+
+```text
+Extend the allocator with a LargeRun path for allocations larger than LARGE_THRESHOLD.
+
+Rules:
+- Large allocations consume whole contiguous runs of spans.
+- Run classes are powers of two in span counts.
+- Use per-thread local run lists and public SPMC run-lists.
+- Reuse the existing bounded helping protocol for run acquisition.
+- Large deallocation returns the whole run to the deallocating thread's heap.
+- Do not use the small-object MPSC remote free-list for large allocations.
+- Do not coalesce runs in the wait-free deallocation path.
+- OS allocation is allowed only behind a non-real-time feature flag.
+- Requests above MAX_LARGE_SPANS return null/error in RT mode.
+- Every loop must be bounded by MAX_LARGE_RUN_CLASSES, MAX_LARGE_SPANS, N, P, H, or a configured constant.
+```
+
+## A.16 Summary
+
+Large allocations can be supported without abandoning the wfspan idea, but the design should not try to make the small-object span algorithm handle huge objects directly. The clean fix is a separate LargeRun allocator:
+
+```text
+small objects -> blocks inside one span
+large objects -> whole runs of spans
+```
+
+This preserves the core wfspan philosophy:
+
+```text
+bounded steps
+no starvation
+no global heap lock
+non-linearizable internal lists are acceptable
+extra memory footprint is bounded and measurable
+```

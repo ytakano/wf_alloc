@@ -26,6 +26,12 @@ pub enum SpanState {
     FullPublic = 3,
     NonEmptyPublic = 4,
     Discarded = 5,
+    /// Large run handed to a user allocation (whole-run, guide Appendix A).
+    RunAllocated = 6,
+    /// Free large run held in an owner's private local run-list.
+    RunFreeLocal = 7,
+    /// Free large run in a public SPMC run-list or a run help record.
+    RunFreePublic = 8,
 }
 
 /// Owner-thread-only metadata, kept on its own cache line.
@@ -149,6 +155,56 @@ pub unsafe fn init_span(
         (*span).local.free_count.store(count, Ordering::Relaxed);
     }
     span
+}
+
+/// Initialize the base span of a freshly carved large run and hand it to
+/// `owner`. O(1): no block free-list is built — the whole run is one
+/// allocation unit. Field reinterpretation for runs: `size_class` holds the
+/// run class, `block_count` holds the span count (= `1 << run_class`), and
+/// `block_size` holds the run size in bytes (diagnostics).
+///
+/// # Safety
+/// `base` must point to the start of `span_count` contiguous `SPAN_SIZE`-byte,
+/// `SPAN_SIZE`-aligned spans exclusively owned by the caller, not yet visible
+/// to other threads.
+pub unsafe fn init_run(
+    base: *mut u8,
+    run_class: usize,
+    span_count: usize,
+    owner: usize,
+) -> *mut SpanHeader {
+    debug_assert!((base as usize).is_multiple_of(SPAN_SIZE));
+    debug_assert_eq!(span_count, 1usize << run_class);
+    let run = base as *mut SpanHeader;
+    // SAFETY: the region is exclusively owned and the base span is large
+    // enough for the header (const-asserted above); we write a fresh header.
+    unsafe {
+        core::ptr::write(
+            run,
+            SpanHeader {
+                owner: AtomicUsize::new(owner),
+                size_class: AtomicUsize::new(run_class),
+                block_size: AtomicUsize::new(span_count * SPAN_SIZE),
+                block_count: AtomicUsize::new(span_count),
+                state: AtomicUsize::new(SpanState::RunAllocated as usize),
+                node: AtomicPtr::new(core::ptr::null_mut()),
+                node_storage: SpanNode::new(),
+                local: LocalMeta {
+                    free: LocalFreeList::new(),
+                    free_count: AtomicUsize::new(0),
+                    pending_remote: AtomicPtr::new(core::ptr::null_mut()),
+                    next_local: AtomicPtr::new(core::ptr::null_mut()),
+                },
+                remote: RemoteMeta {
+                    free: RemoteMpscFreeList::new(),
+                    free_count: AtomicIsize::new(0),
+                },
+            },
+        );
+        let node_ptr = &raw mut (*run).node_storage;
+        (*run).node.store(node_ptr, Ordering::Relaxed);
+    }
+    run
 }
 
 /// Pop one block from the owner's local free-list. O(1).

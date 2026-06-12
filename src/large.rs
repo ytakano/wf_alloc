@@ -1,270 +1,284 @@
-//! Large-object allocator: power-of-two size classes from MIN_LARGE_SIZE to MAX_LARGE_SIZE.
+//! Wait-free large-object path: whole runs of contiguous spans (guide
+//! Appendix A, Policy 1: whole-larger-run, no splitting, no coalescing).
 //!
-//! Allocations that exceed the span-based small-object allocator's MAX_BLOCK_SIZE
-//! are served here.  A bump pointer provides fresh blocks (one CAS-loop per
-//! allocation); freed blocks are recycled through a per-class Treiber stack
-//! (CAS2 + version counter for ABA safety, reusing the existing HeadWord
-//! infrastructure).  This path is lock-free, not wait-free; large allocations
-//! are assumed infrequent.
+//! A request that does not fit a small size class is served by a **large
+//! run**: `2^r` contiguous, `SPAN_SIZE`-aligned spans carved from the SAME
+//! `FixedSpanPool` region as small spans (single FAA). The run's base span
+//! carries a `SpanHeader` (see `span::init_run`), so free runs circulate
+//! through the same wait-free machinery as small spans: per-thread private
+//! `local_runs` lists, public SPMC `public_runs` lists, and the bounded
+//! helping protocol (`runlists_acquire_run`).
 //!
-//! ## Memory layout of each allocation
+//! Policy 1: if class `k` has no free run, a whole class-`j > k` run may be
+//! used as-is. The run keeps the class it was carved at forever; freeing it
+//! returns it to that class's list, so capacity never degrades.
+//!
+//! Deallocation is O(1): the DEALLOCATING thread becomes the run's owner
+//! and keeps (or publishes) the whole run. No remote free-list is needed —
+//! the previous owner retains no reference to a freed run.
+//!
+//! ## Memory layout of one large allocation (run class r)
 //!
 //! ```text
-//! alloc_base (alloc_size-aligned)
-//!   ├─ [padding: back_offset - HEADER_SIZE bytes]   (only when align > HEADER_SIZE)
-//!   ├─ LargeHeader { back_offset, alloc_size }       (HEADER_SIZE bytes)
-//!   └─ payload (back_offset bytes from alloc_base)   ← returned to caller
+//! run_base (SPAN_SIZE-aligned, 2^r spans)
+//!   ├─ SpanHeader (run header; within SPAN_HEADER_RESERVE bytes)
+//!   ├─ [padding to align the payload]
+//!   ├─ LargeAllocHeader { magic, run, run_class, span_count }
+//!   └─ payload (layout.align()-aligned)                ← returned to caller
 //! ```
 //!
-//! While a block is on the free list, its first `usize` stores the next pointer.
+//! Dispatch between the small and large paths is a pure function of the
+//! `Layout` (`size_to_class`), identical in alloc and dealloc. Hence
+//! `span_from_ptr` (SPAN_SIZE masking) is never applied to a large payload,
+//! whose masked address could be a headerless interior span of the run.
 
 use core::alloc::Layout;
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::Ordering;
 
+use crate::acquire::runlists_acquire_run;
 use crate::align::round_up;
-use crate::atomic_backend::{Cas2Backend, DefaultCas2Backend};
-use crate::config::{LARGE_CLASSES, MAX_LARGE_SIZE, MIN_LARGE_SIZE};
-use crate::tagged::HeadWord;
+use crate::allocator::WfSpanAllocator;
+use crate::atomic_backend::DefaultCas2Backend;
+use crate::config::{
+    LARGE_LOCAL_RUN_LIMIT_K, MAX_LARGE_RUN_CLASSES, MAX_LARGE_SPANS, OWNER_PUBLIC,
+    SPAN_HEADER_RESERVE, SPAN_SIZE,
+};
+use crate::span::{SpanHeader, SpanState, init_run};
+use crate::stats::{AllocatorStats, StepCounter};
+use crate::thread::ThreadToken;
 
-/// Size of `LargeHeader` in bytes (two `usize` fields).
-const HEADER_SIZE: usize = 16;
-const _: () = assert!(core::mem::size_of::<LargeHeader>() == HEADER_SIZE);
+/// Marker validating that a freed pointer carries a large-run header
+/// (debug builds only). ASCII "WFLRUN1\0" as a usize.
+pub const LARGE_MAGIC: usize = 0x5746_4C52_554E_3100;
 
-/// Header placed immediately before the payload of every large allocation.
+/// Hidden header placed immediately before every large payload.
 #[repr(C)]
-pub struct LargeHeader {
-    /// Distance in bytes from `alloc_base` to the payload pointer.
-    pub back_offset: usize,
-    /// Total allocated size (a power of two ≥ MIN_LARGE_SIZE).
-    pub alloc_size: usize,
+pub struct LargeAllocHeader {
+    pub magic: usize,
+    /// Base run header (the run's first span).
+    pub run: *mut SpanHeader,
+    /// Class the run was CARVED at (Policy 1: never changes).
+    pub run_class: usize,
+    /// `1 << run_class`; redundant, kept for debug cross-checks.
+    pub span_count: usize,
 }
 
-/// Per-size-class free list backed by a CAS2 Treiber stack (ABA-safe).
-/// Head stores `(alloc_base_addr, version)`.
-#[repr(C, align(16))]
-struct LargeBin {
-    head: UnsafeCell<HeadWord>,
+const HDR_SIZE: usize = core::mem::size_of::<LargeAllocHeader>();
+
+/// Spans in a run of `class`.
+pub const fn run_class_spans(class: usize) -> usize {
+    1 << class
 }
 
-// SAFETY: `head` is accessed only through `DefaultCas2Backend` (CAS2 / lock cmpxchg16b).
-unsafe impl Send for LargeBin {}
-unsafe impl Sync for LargeBin {}
-
-impl LargeBin {
-    const fn new() -> Self {
-        Self {
-            head: UnsafeCell::new(HeadWord::ZERO),
-        }
-    }
-
-    /// Push `alloc_base` (a non-zero address) onto the stack.
-    ///
-    /// # Safety
-    /// The first `usize`-sized word at `alloc_base` must be exclusively writable
-    /// by this call (the block is not simultaneously visible to other threads).
-    unsafe fn push(&self, alloc_base: usize) {
-        let mut cur = unsafe { DefaultCas2Backend::load(self.head.get()) };
-        loop {
-            // Store next pointer in the free block's first word.
-            unsafe { *(alloc_base as *mut usize) = cur.ptr };
-            let new = HeadWord::new(alloc_base, cur.version.wrapping_add(1));
-            match unsafe { DefaultCas2Backend::compare_exchange(self.head.get(), cur, new) } {
-                Ok(_) => return,
-                Err(actual) => cur = actual,
-            }
-        }
-    }
-
-    /// Pop the top entry. Returns 0 if the stack is empty.
-    ///
-    /// # Safety
-    /// The stack must contain only addresses of valid large allocations.
-    unsafe fn pop(&self) -> usize {
-        let mut cur = unsafe { DefaultCas2Backend::load(self.head.get()) };
-        loop {
-            if cur.ptr == 0 {
-                return 0;
-            }
-            let next = unsafe { *(cur.ptr as *const usize) };
-            let new = HeadWord::new(next, cur.version.wrapping_add(1));
-            match unsafe { DefaultCas2Backend::compare_exchange(self.head.get(), cur, new) } {
-                Ok(_) => return cur.ptr,
-                Err(actual) => cur = actual,
-            }
-        }
-    }
+/// Bytes in a run of `class`.
+pub const fn run_class_bytes(class: usize) -> usize {
+    SPAN_SIZE << class
 }
 
-/// Bump-pointer + per-class Treiber-stack pool for large objects.
-pub struct LargePool {
-    base: AtomicUsize,
-    bump: AtomicUsize,
-    end: AtomicUsize,
-    bins: [LargeBin; LARGE_CLASSES],
+/// Smallest run class whose run is guaranteed to hold the run header
+/// reserve, a `LargeAllocHeader`, and a `layout`-aligned payload.
+/// `None` if the request needs more than `MAX_LARGE_SPANS` spans (or
+/// overflows). Alignments larger than `SPAN_SIZE` are honored via slack.
+pub fn run_class_for_layout(layout: Layout) -> Option<usize> {
+    let align = layout.align().max(core::mem::align_of::<LargeAllocHeader>());
+    let needed = SPAN_HEADER_RESERVE
+        .checked_add(HDR_SIZE)?
+        .checked_add(align - 1)?
+        .checked_add(layout.size())?;
+    let needed_spans = needed.div_ceil(SPAN_SIZE);
+    let spans = needed_spans.checked_next_power_of_two()?;
+    if spans > MAX_LARGE_SPANS {
+        return None;
+    }
+    Some(spans.trailing_zeros() as usize)
 }
 
-// SAFETY: all shared state is atomics or CAS2-protected UnsafeCell.
-unsafe impl Send for LargePool {}
-unsafe impl Sync for LargePool {}
-
-impl LargePool {
-    pub const fn new() -> Self {
-        const EMPTY_BIN: LargeBin = LargeBin::new();
-        Self {
-            base: AtomicUsize::new(0),
-            bump: AtomicUsize::new(0),
-            end: AtomicUsize::new(0),
-            bins: [EMPTY_BIN; LARGE_CLASSES],
-        }
-    }
-
-    /// Install the backing memory region for large objects.
-    ///
-    /// # Safety
-    /// `ptr..ptr+len` must be valid, writable, exclusively owned memory that
-    /// outlives the pool.  Must be called at most once before any allocation.
-    pub unsafe fn set_region(&self, ptr: *mut u8, len: usize) {
-        let base = round_up(ptr as usize, HEADER_SIZE);
-        let end = (ptr as usize).saturating_add(len);
-        self.base.store(base, Ordering::Relaxed);
-        self.end.store(end, Ordering::Relaxed);
-        self.bump.store(base, Ordering::Release);
-    }
-
-    /// Base address of the installed region (0 if not yet installed).
-    pub fn base_addr(&self) -> usize {
-        self.base.load(Ordering::Relaxed)
-    }
-
-    /// One-past-end address of the installed region (0 if not yet installed).
-    pub fn end_addr(&self) -> usize {
-        self.end.load(Ordering::Relaxed)
-    }
-
-    /// Bump the internal pointer forward by `alloc_size` bytes, aligning the
-    /// result to `alloc_size`.  Returns the aligned base address, or 0 on
-    /// exhaustion.  Lock-free (CAS retry).
-    fn bump_aligned(&self, alloc_size: usize) -> usize {
-        let end = self.end.load(Ordering::Relaxed);
-        let mut cur = self.bump.load(Ordering::Relaxed);
-        loop {
-            let aligned = round_up(cur, alloc_size);
-            let next = match aligned.checked_add(alloc_size) {
-                Some(n) => n,
-                None => return 0,
-            };
-            if next > end {
-                return 0;
-            }
-            match self.bump.compare_exchange_weak(
-                cur,
-                next,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return aligned,
-                Err(actual) => cur = actual,
-            }
-        }
-    }
-
-    /// Allocate a large object.  Returns null on unsupported layout or exhaustion.
-    ///
-    /// The returned pointer is aligned to `layout.align()` (or HEADER_SIZE,
-    /// whichever is larger).
-    ///
-    /// # Safety
-    /// `set_region` must have been called before the first allocation.
-    pub unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let size = layout.size();
-        // Guarantee the header fits and is naturally aligned before the payload.
-        let align = layout.align().max(HEADER_SIZE);
-
-        // back_offset: distance from alloc_base to payload.
-        // Smallest multiple of `align` that is >= HEADER_SIZE.
-        let back_offset = round_up(HEADER_SIZE, align);
-
-        let needed = match back_offset.checked_add(size) {
-            Some(n) => n,
-            None => return core::ptr::null_mut(),
-        };
-        if needed > MAX_LARGE_SIZE {
-            return core::ptr::null_mut();
-        }
-
-        let class = match large_size_class(needed) {
-            Some(c) => c,
-            None => return core::ptr::null_mut(),
-        };
-        let alloc_size = MIN_LARGE_SIZE << class;
-
-        // Prefer a recycled block; fall back to fresh bump allocation.
-        //
-        // SAFETY: the stack only holds addresses of live large allocations.
-        let alloc_base = unsafe { self.bins[class].pop() };
-        let alloc_base = if alloc_base != 0 {
-            alloc_base
-        } else {
-            let b = self.bump_aligned(alloc_size);
-            if b == 0 {
-                return core::ptr::null_mut();
-            }
-            b
-        };
-
-        // `alloc_base` is alloc_size-aligned; since alloc_size >= align,
-        // `alloc_base + back_offset` is align-aligned.
-        let payload_ptr = alloc_base + back_offset;
-        let header = (payload_ptr - HEADER_SIZE) as *mut LargeHeader;
-        // SAFETY: `payload_ptr - HEADER_SIZE` lies within the allocation.
-        unsafe {
-            (*header).back_offset = back_offset;
-            (*header).alloc_size = alloc_size;
-        }
-
-        payload_ptr as *mut u8
-    }
-
-    /// Deallocate a large object returned by `alloc` on this pool.
-    ///
-    /// # Safety
-    /// `ptr` must have been returned by `alloc` on this pool and not yet freed.
-    pub unsafe fn dealloc(&self, ptr: *mut u8) {
-        let payload_addr = ptr as usize;
-        let header = (payload_addr - HEADER_SIZE) as *const LargeHeader;
-        // SAFETY: header was written by `alloc`; the block is exclusively owned.
-        let back_offset = unsafe { (*header).back_offset };
-        let alloc_size = unsafe { (*header).alloc_size };
-        let alloc_base = payload_addr - back_offset;
-        let class = large_size_class(alloc_size)
-            .expect("corrupted LargeHeader: invalid alloc_size");
-        // SAFETY: `alloc_base` is the start of a live large allocation; first
-        // word is writable and not concurrently observed by other threads.
-        unsafe { self.bins[class].push(alloc_base) };
-    }
-}
-
-impl Default for LargePool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Map a byte count to a large-object size class index.
+/// Write the `LargeAllocHeader` and return the aligned payload pointer.
 ///
-/// Returns the index of the smallest large class whose capacity is ≥ `needed`,
-/// or `None` if `needed > MAX_LARGE_SIZE` or the value overflows.
-pub fn large_size_class(needed: usize) -> Option<usize> {
-    if needed > MAX_LARGE_SIZE {
-        return None;
+/// # Safety
+/// `run` must be the initialized base header of a run of `run_class`
+/// exclusively owned by the caller, and `run_class` must be at least
+/// `run_class_for_layout(layout)`.
+unsafe fn place_large_payload(
+    run: *mut SpanHeader,
+    run_class: usize,
+    layout: Layout,
+) -> *mut u8 {
+    let align = layout.align().max(core::mem::align_of::<LargeAllocHeader>());
+    // Pointer arithmetic (not int casts) keeps the run's provenance.
+    let payload_off =
+        round_up(run as usize + SPAN_HEADER_RESERVE + HDR_SIZE, align) - run as usize;
+    // SAFETY: payload_off + layout.size() fits the run (see debug_asserts;
+    // guaranteed by run_class_for_layout).
+    let payload = unsafe { (run as *mut u8).add(payload_off) };
+    let header = unsafe { payload.sub(HDR_SIZE) } as *mut LargeAllocHeader;
+    debug_assert!(header as usize >= run as usize + SPAN_HEADER_RESERVE);
+    debug_assert!(payload_off + layout.size() <= run_class_bytes(run_class));
+    // SAFETY: header lies past the reserve area, inside the exclusively
+    // owned run (asserted above; guaranteed by run_class_for_layout).
+    unsafe {
+        core::ptr::write(
+            header,
+            LargeAllocHeader {
+                magic: LARGE_MAGIC,
+                run,
+                run_class,
+                span_count: run_class_spans(run_class),
+            },
+        );
     }
-    let size = needed.max(MIN_LARGE_SIZE).checked_next_power_of_two()?;
-    if size > MAX_LARGE_SIZE {
-        return None;
+    payload
+}
+
+impl<const N: usize, const C: usize> WfSpanAllocator<N, C> {
+    /// Large allocation (guide A.7, Policy 1). Bounded: at most
+    /// `MAX_LARGE_RUN_CLASSES` class steps, each one local pop (O(1)) plus
+    /// one helping acquisition (O(H + P)), plus one raw carve (one FAA, at
+    /// most one rollback CAS) — O(R · N) total, no retry loops.
+    ///
+    /// # Safety
+    /// As for [`Self::alloc_with_token`].
+    pub(crate) unsafe fn alloc_large_with_token_counted(
+        &self,
+        layout: Layout,
+        token: ThreadToken,
+        step: &mut StepCounter,
+    ) -> *mut u8 {
+        let Some(min_class) = run_class_for_layout(layout) else {
+            return core::ptr::null_mut();
+        };
+        let tid = token.id;
+        debug_assert!(tid < N);
+
+        // Class search order per class (Policy 1):
+        //   (a) own local free runs — exact-class reuse, zero waste, O(1);
+        //   (b) public run-lists via bounded helping;
+        //   (c) fresh carve, at the EXACT class only: if carving 2^min_class
+        //       spans fails, any larger carve must fail too, and escalated
+        //       reuse (a)/(b) only wastes space temporarily — the run goes
+        //       back to its own class on free.
+        // Bounded loop: at most MAX_LARGE_RUN_CLASSES iterations.
+        for class in min_class..MAX_LARGE_RUN_CLASSES {
+            step.large_class_steps += 1;
+
+            // SAFETY: local_runs is owner-private; we are thread `tid`.
+            let run = unsafe { self.heaps[tid].local_runs[class].pop_front() };
+            if !run.is_null() {
+                // SAFETY: popped from our own list => exclusively ours.
+                return unsafe { self.finish_large(run, class, layout) };
+            }
+
+            // SAFETY: tid is a valid registered id per token contract.
+            let run = unsafe {
+                runlists_acquire_run::<DefaultCas2Backend, N, C>(self, tid, class, step)
+            };
+            if !run.is_null() {
+                // SAFETY: acquire hands us exclusive ownership of `run`.
+                unsafe {
+                    debug_assert_eq!((*run).owner.load(Ordering::Relaxed), OWNER_PUBLIC);
+                    (*run).owner.store(tid, Ordering::Release);
+                    return self.finish_large(run, class, layout);
+                }
+            }
+
+            if class == min_class {
+                let raw = self.pool.acquire_raw_run(run_class_spans(class), step);
+                if !raw.is_null() {
+                    // SAFETY: the pool hands out each span range exactly once.
+                    unsafe {
+                        let run = init_run(raw, class, run_class_spans(class), tid);
+                        AllocatorStats::bump(&self.stats.allocated_runs);
+                        return self.finish_large(run, class, layout);
+                    }
+                }
+            }
+        }
+
+        // Exhaustion: fixed backend returns null (never OS allocation).
+        core::ptr::null_mut()
     }
-    let class = size.trailing_zeros() as usize - MIN_LARGE_SIZE.trailing_zeros() as usize;
-    if class >= LARGE_CLASSES { None } else { Some(class) }
+
+    /// Stamp an exclusively owned free run as allocated and lay out the
+    /// hidden header + payload.
+    ///
+    /// # Safety
+    /// `run` must be an initialized run header of class `class`, exclusively
+    /// owned by the calling thread and in no list.
+    unsafe fn finish_large(
+        &self,
+        run: *mut SpanHeader,
+        class: usize,
+        layout: Layout,
+    ) -> *mut u8 {
+        // SAFETY: exclusive ownership per contract.
+        unsafe {
+            debug_assert_eq!((*run).size_class.load(Ordering::Relaxed), class);
+            debug_assert_eq!(
+                (*run).block_count.load(Ordering::Relaxed),
+                run_class_spans(class)
+            );
+            (*run)
+                .state
+                .store(SpanState::RunAllocated as usize, Ordering::Relaxed);
+            place_large_payload(run, class, layout)
+        }
+    }
+
+    /// Large deallocation (guide A.10). O(1) bounded: header recovery, one
+    /// owner store, then one local push OR one publish — no loops, no CAS.
+    /// The deallocating thread becomes the run's new owner.
+    ///
+    /// # Safety
+    /// `ptr` must have been returned by the large path of this allocator and
+    /// not yet freed; `token` as in [`Self::dealloc_with_token`].
+    pub(crate) unsafe fn dealloc_large_with_token_counted(
+        &self,
+        ptr: *mut u8,
+        _layout: Layout,
+        token: ThreadToken,
+        step: &mut StepCounter,
+    ) {
+        step.local_steps += 1;
+        // Pointer arithmetic (not an int cast) keeps the run's provenance.
+        // SAFETY: the large path placed the header immediately before `ptr`.
+        let header = unsafe { ptr.sub(HDR_SIZE) } as *mut LargeAllocHeader;
+        // SAFETY: the large path wrote this header immediately before the
+        // payload; the allocation is exclusively ours to retire.
+        unsafe {
+            debug_assert_eq!(
+                (*header).magic,
+                LARGE_MAGIC,
+                "dealloc of a non-large or corrupted pointer on the large path"
+            );
+            let run = (*header).run;
+            let class = (*header).run_class;
+            debug_assert!(class < MAX_LARGE_RUN_CLASSES);
+            debug_assert_eq!((*header).span_count, run_class_spans(class));
+            debug_assert_eq!(
+                (*run).state.load(Ordering::Relaxed),
+                SpanState::RunAllocated as usize,
+                "double free of a large run"
+            );
+
+            let list = &self.heaps[token.id].local_runs[class];
+            if list.len() >= LARGE_LOCAL_RUN_LIMIT_K {
+                // Bounded trim: publish the freed run to our own public
+                // run-list (owner-only enqueue, one release store).
+                (*run).owner.store(OWNER_PUBLIC, Ordering::Release);
+                (*run)
+                    .state
+                    .store(SpanState::RunFreePublic as usize, Ordering::Relaxed);
+                self.heaps[token.id].public_runs[class].enqueue_by_owner(run, step);
+                AllocatorStats::bump(&self.stats.published_runs);
+            } else {
+                (*run).owner.store(token.id, Ordering::Release);
+                (*run)
+                    .state
+                    .store(SpanState::RunFreeLocal as usize, Ordering::Relaxed);
+                list.push_front(run);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -273,47 +287,34 @@ mod tests {
     use crate::config::MAX_BLOCK_SIZE;
 
     #[test]
-    fn size_class_boundaries() {
-        // Anything <= MAX_BLOCK_SIZE maps to class 0 (MIN_LARGE_SIZE is the floor).
-        assert_eq!(large_size_class(1), Some(0));
-        assert_eq!(large_size_class(MAX_BLOCK_SIZE), Some(0));
-        assert_eq!(large_size_class(MIN_LARGE_SIZE), Some(0));
-        // One byte over MIN_LARGE_SIZE needs class 1.
-        assert_eq!(large_size_class(MIN_LARGE_SIZE + 1), Some(1));
-        // Exact power-of-two boundaries.
-        assert_eq!(large_size_class(MIN_LARGE_SIZE * 2), Some(1));
-        assert_eq!(large_size_class(MIN_LARGE_SIZE * 2 + 1), Some(2));
-        // Top of the range.
-        assert_eq!(large_size_class(MAX_LARGE_SIZE), Some(LARGE_CLASSES - 1));
-        // Over the limit.
-        assert_eq!(large_size_class(MAX_LARGE_SIZE + 1), None);
-        assert_eq!(large_size_class(usize::MAX), None);
-    }
+    fn run_class_boundaries() {
+        // A small-ish oversized request fits the 1-span class 0
+        // (64 KiB - reserve - header is plenty for MAX_BLOCK_SIZE + 1).
+        let l = Layout::from_size_align(MAX_BLOCK_SIZE + 1, 16).unwrap();
+        assert_eq!(run_class_for_layout(l), Some(0));
 
-    #[cfg(feature = "std")]
-    #[test]
-    fn alloc_dealloc_roundtrip() {
-        use std::alloc::Layout;
+        // The largest payload still fitting one span.
+        let max0 = SPAN_SIZE - SPAN_HEADER_RESERVE - HDR_SIZE - 15;
+        let l = Layout::from_size_align(max0, 16).unwrap();
+        assert_eq!(run_class_for_layout(l), Some(0));
+        // One byte more needs 2 spans => class 1.
+        let l = Layout::from_size_align(max0 + 1, 16).unwrap();
+        assert_eq!(run_class_for_layout(l), Some(1));
 
-        // 4 spans = 4 × 64 KiB = 256 KiB; enough for multiple class-0 blocks.
-        let backing = crate::region::OwnedRegion::new(4);
-        let pool = LargePool::new();
-        unsafe { pool.set_region(backing.ptr(), backing.len()) };
+        // 3 spans round up to class 2 (4 spans).
+        let l = Layout::from_size_align(SPAN_SIZE * 2 + 1, 16).unwrap();
+        assert_eq!(run_class_for_layout(l), Some(2));
 
-        let layout = Layout::from_size_align(MIN_LARGE_SIZE / 2, 16).unwrap();
-        let ptr = unsafe { pool.alloc(layout) };
-        assert!(!ptr.is_null());
-        assert_eq!(ptr as usize % 16, 0);
+        // align > SPAN_SIZE is honored via slack.
+        let l = Layout::from_size_align(64, 2 * SPAN_SIZE).unwrap();
+        assert_eq!(run_class_for_layout(l), Some(2));
 
-        // Write + read back to catch trivial corruption.
-        unsafe { ptr.write(0xAB) };
-        assert_eq!(unsafe { ptr.read() }, 0xAB);
-
-        unsafe { pool.dealloc(ptr) };
-
-        // After freeing, the next alloc of the same class should reuse the block.
-        let ptr2 = unsafe { pool.alloc(layout) };
-        assert_eq!(ptr, ptr2, "recycled block should be reused");
-        unsafe { pool.dealloc(ptr2) };
+        // Top of the range: needs > MAX_LARGE_SPANS spans => None.
+        let l = Layout::from_size_align(MAX_LARGE_SPANS * SPAN_SIZE, 16).unwrap();
+        assert_eq!(run_class_for_layout(l), None);
+        // Largest representable request.
+        let max_req = MAX_LARGE_SPANS * SPAN_SIZE - SPAN_HEADER_RESERVE - HDR_SIZE - 15;
+        let l = Layout::from_size_align(max_req, 16).unwrap();
+        assert_eq!(run_class_for_layout(l), Some(MAX_LARGE_RUN_CLASSES - 1));
     }
 }

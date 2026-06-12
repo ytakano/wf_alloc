@@ -100,31 +100,12 @@ fn all_size_classes_and_alignment() {
     unsafe { wf_alloc::verify::check_quiescent(alloc) };
 }
 
+/// Oversized/over-aligned layouts are served by the large-run path from the
+/// SAME single region; only requests beyond MAX_LARGE_SPANS return null.
 #[test]
-fn unsupported_large_returns_null() {
-    let (alloc, _region) = setup(2);
-    let token = alloc.register_thread().unwrap();
-    for (size, align) in [(SPAN_SIZE, 8), (SPAN_SIZE / 2, 8), (64, SPAN_SIZE)] {
-        let layout = Layout::from_size_align(size, align).unwrap();
-        // SAFETY: valid token.
-        let p = unsafe { alloc.alloc_with_token(layout, token) };
-        assert!(p.is_null(), "size={size} align={align} must be unsupported");
-    }
-}
-
-/// With `init_large`, the same layouts that previously returned null succeed.
-#[test]
-fn large_region_serves_oversized_for_small_pool() {
-    let small_region = OwnedRegion::new(2);
-    // 16 spans = 1 MiB; enough for one block of each test case even after
-    // alignment rounding (largest alloc_size here is 131 KiB for class 2).
-    let large_region = OwnedRegion::new(16);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
-    // SAFETY: init once, before sharing; leaked box never moves.
-    unsafe {
-        alloc.init(small_region.ptr(), small_region.len());
-        alloc.init_large(large_region.ptr(), large_region.len());
-    }
+fn oversized_layouts_served_from_single_region() {
+    // 16 spans = 1 MiB; the largest case below needs a class-2 run (4 spans).
+    let (alloc, _region) = setup(16);
     let token = alloc.register_thread().unwrap();
 
     for (size, align) in [(SPAN_SIZE, 8usize), (SPAN_SIZE / 2, 8), (64, SPAN_SIZE)] {
@@ -133,12 +114,19 @@ fn large_region_serves_oversized_for_small_pool() {
         let p = unsafe { alloc.alloc_with_token(layout, token) };
         assert!(
             !p.is_null(),
-            "size={size} align={align}: should succeed with large region"
+            "size={size} align={align}: should succeed via the large-run path"
         );
         assert_eq!(p as usize % align, 0, "ptr not {align}-byte aligned");
         // SAFETY: freed once.
         unsafe { alloc.dealloc_with_token(p, layout, token) };
     }
+
+    // A request that cannot fit even the largest run class must return null.
+    let layout = Layout::from_size_align(wf_alloc::MAX_LARGE_SIZE, 8).unwrap();
+    // SAFETY: valid token.
+    let p = unsafe { alloc.alloc_with_token(layout, token) };
+    assert!(p.is_null(), "request beyond MAX_LARGE_SPANS must return null");
+
     // SAFETY: quiescent.
     unsafe { wf_alloc::verify::check_quiescent(alloc) };
 }

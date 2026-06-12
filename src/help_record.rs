@@ -69,16 +69,19 @@ impl Default for HelpRecord {
     }
 }
 
-/// Per-thread, per-size-class request table. Fixed arrays; no dynamic
-/// allocation in the allocator core.
+/// Per-thread, per-size-class request table, plus a per-run-class table for
+/// the large path. Fixed arrays; no dynamic allocation in the allocator core.
 pub struct HelpTable<const N: usize, const C: usize> {
     pub records: [[HelpRecord; C]; N],
+    pub run_records: [[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]; N],
 }
 
 impl<const N: usize, const C: usize> HelpTable<N, C> {
     pub const fn new() -> Self {
         Self {
             records: [const { [const { HelpRecord::new() }; C] }; N],
+            run_records:
+                [const { [const { HelpRecord::new() }; crate::config::MAX_LARGE_RUN_CLASSES] }; N],
         }
     }
 }
