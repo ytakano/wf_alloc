@@ -107,7 +107,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4, 8>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
     /// // Must be called exactly once before sharing across threads.
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// # }
@@ -138,7 +138,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<2, 8>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<2>::new()));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     ///
     /// let t0 = alloc.register_thread(); // first registration
@@ -161,7 +161,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// ```
     /// use wf_alloc::WfSpanAllocator;
     ///
-    /// let bound = WfSpanAllocator::<4, 8>::theoretical_extra_bound();
+    /// let bound = WfSpanAllocator::<4>::theoretical_extra_bound();
     /// assert!(bound > 0);
     /// ```
     pub const fn theoretical_extra_bound() -> usize {
@@ -195,7 +195,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4, 8>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///
@@ -226,7 +226,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4, 8>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///
@@ -356,7 +356,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4, 8>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///

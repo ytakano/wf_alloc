@@ -41,9 +41,8 @@ impl StepCounter {
     /// use wf_alloc::size_class::{blocks_per_span, class_to_size};
     ///
     /// const N: usize = 4;
-    /// const C: usize = 8;
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<N>::new()));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///

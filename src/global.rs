@@ -30,11 +30,11 @@ use crate::thread::ThreadToken;
 /// static mut REGION: AlignedRegion = AlignedRegion([0u8; 128 * 65536]);
 ///
 /// #[global_allocator]
-/// static ALLOC: GlobalWfSpanAllocator<8, 8> = GlobalWfSpanAllocator::new();
+/// static ALLOC: GlobalWfSpanAllocator<8> = GlobalWfSpanAllocator::new();
 ///
 /// // Call once before any heap allocation (e.g., early in `main`).
 /// fn setup() {
-///     unsafe { ALLOC.init(REGION.0.as_mut_ptr(), REGION.0.len()) };
+///     unsafe { ALLOC.init((&raw mut REGION.0).cast::<u8>(), 128 * 65536) };
 /// }
 /// ```
 pub struct GlobalWfSpanAllocator<
@@ -63,7 +63,7 @@ impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C
     /// // Requires `features = ["global"]`.
     /// use wf_alloc::global::GlobalWfSpanAllocator;
     ///
-    /// static ALLOC: GlobalWfSpanAllocator<4, 8> = GlobalWfSpanAllocator::new();
+    /// static ALLOC: GlobalWfSpanAllocator<4> = GlobalWfSpanAllocator::new();
     /// ```
     pub const fn new() -> Self {
         Self {
@@ -91,7 +91,7 @@ impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let g = Box::leak(Box::new(GlobalWfSpanAllocator::<4, 8>::new()));
+    /// let g = Box::leak(Box::new(GlobalWfSpanAllocator::<4>::new()));
     /// unsafe { g.init(region.ptr(), region.len()) };
     ///
     /// // First call registers this thread; subsequent calls return the cached token.

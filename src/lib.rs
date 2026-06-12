@@ -17,13 +17,13 @@
 //! use wf_alloc::WfSpanAllocator;
 //! use wf_alloc::region::OwnedRegion;
 //!
-//! // Up to 4 threads, 8 size classes (16–2048 bytes).
+//! // Up to 4 threads; size classes (16 B – 16 KiB) and the huge granule
+//! // use their defaults.
 //! const N: usize = 4;
-//! const C: usize = 8;
 //!
 //! // Pin the allocator in place; it must not move after init.
 //! let region = OwnedRegion::new(64);
-//! let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+//! let alloc = Box::leak(Box::new(WfSpanAllocator::<N>::new()));
 //! unsafe { alloc.init(region.ptr(), region.len()) };
 //!
 //! // Each thread registers once to obtain a token.

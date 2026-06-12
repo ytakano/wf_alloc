@@ -13,11 +13,14 @@ use std::sync::mpsc;
 
 use wf_alloc::region::OwnedRegion;
 use wf_alloc::size_class::{blocks_per_span, class_to_size};
-use wf_alloc::{HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, StepCounter, WfSpanAllocator};
+use wf_alloc::{
+    HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, MAX_SUPPORTED_CLASSES, StepCounter, WfSpanAllocator,
+};
 
-// 4 threads, 8 size classes (16–2048 bytes).
+// 4 threads; the size classes (16 B – 16 KiB) and the huge granule use
+// their defaults, so only N needs to be specified.
 const N: usize = 4;
-const C: usize = 8;
+const C: usize = MAX_SUPPORTED_CLASSES;
 
 fn main() {
     local_alloc_free();
@@ -30,7 +33,7 @@ fn local_alloc_free() {
     // Pin the allocator in a leaked Box so it lives for the duration of the
     // program and its address never changes after init().
     let region = Box::leak(Box::new(OwnedRegion::new(64)));
-    let alloc: &'static WfSpanAllocator<N, C> =
+    let alloc: &'static WfSpanAllocator<N> =
         Box::leak(Box::new(WfSpanAllocator::new()));
     // Safety: called once before any thread touches the allocator;
     // the leaked allocation guarantees the allocator never moves.
@@ -97,7 +100,7 @@ fn local_alloc_free() {
 
 fn remote_free() {
     let region = Box::leak(Box::new(OwnedRegion::new(128)));
-    let alloc: &'static WfSpanAllocator<N, C> =
+    let alloc: &'static WfSpanAllocator<N> =
         Box::leak(Box::new(WfSpanAllocator::new()));
     // Safety: as above.
     unsafe { alloc.init(region.ptr(), region.len()) };

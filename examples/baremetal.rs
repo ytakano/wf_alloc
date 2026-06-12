@@ -24,7 +24,8 @@ use core::alloc::Layout;
 
 use wf_alloc::size_class::{blocks_per_span, class_to_size};
 use wf_alloc::{
-    HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, SPAN_SIZE, StepCounter, WfSpanAllocator,
+    HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, MAX_SUPPORTED_CLASSES, SPAN_SIZE, StepCounter,
+    WfSpanAllocator,
 };
 
 // ── Compile-time constants ─────────────────────────────────────────────────────
@@ -32,8 +33,10 @@ use wf_alloc::{
 /// Maximum CPU cores this SoC can have (fixed by the hardware specification).
 const MAX_N: usize = 8;
 
-/// Number of supported size classes: 16, 32, 64, …, 2048 bytes.
-const C: usize = 8;
+/// Number of size classes. The allocator type below omits `C`, so it uses
+/// the default (all 11 classes, 16 B – 16 KiB); this constant only feeds
+/// the pool-sizing math and the per-core class selection.
+const C: usize = MAX_SUPPORTED_CLASSES;
 
 /// Number of spans reserved in the static backing region.
 ///
@@ -44,10 +47,10 @@ const C: usize = 8;
 ///
 /// A safe lower bound is `actual_n × C` — one span per active core per size
 /// class to survive a cold start where no recycled spans are yet available.
-/// Here `actual_n = 4` and `C = 8`, giving exactly 32.  For workloads with
+/// Here `actual_n = 4` and `C = 11`, giving exactly 44.  For workloads with
 /// higher concurrency or burst allocation, scale up toward `N × C × K`
 /// (`K = LOCAL_SPAN_LIMIT_K`) to accommodate per-thread local-list retention.
-const NUM_SPANS: usize = 32;
+const NUM_SPANS: usize = 44;
 
 // ── Static backing memory ──────────────────────────────────────────────────────
 //
@@ -68,7 +71,7 @@ static mut REGION: AlignedRegion = AlignedRegion([0u8; NUM_SPANS * SPAN_SIZE]);
 // with no runtime constructor.  `ALLOC.init()` must be called once at boot
 // before any core calls `alloc_with_token` or `dealloc_with_token`.
 
-static ALLOC: WfSpanAllocator<MAX_N, C> = WfSpanAllocator::new();
+static ALLOC: WfSpanAllocator<MAX_N> = WfSpanAllocator::new();
 
 // ── Runtime CPU detection ──────────────────────────────────────────────────────
 

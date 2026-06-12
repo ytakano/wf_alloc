@@ -91,11 +91,11 @@ struct AlignedRegion([u8; 128 * 65536]);
 static mut REGION: AlignedRegion = AlignedRegion([0u8; 128 * 65536]);
 
 #[global_allocator]
-static ALLOC: GlobalWfSpanAllocator<8, 8> = GlobalWfSpanAllocator::new();
+static ALLOC: GlobalWfSpanAllocator<8> = GlobalWfSpanAllocator::new();
 
 // Call once before any heap allocation (e.g., early in `main`).
 fn setup() {
-    unsafe { ALLOC.init(REGION.0.as_mut_ptr(), REGION.0.len()) };
+    unsafe { ALLOC.init((&raw mut REGION.0).cast::<u8>(), 128 * 65536) };
 }
 ```
 

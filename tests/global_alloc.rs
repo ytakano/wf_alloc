@@ -27,9 +27,16 @@ fn global_alloc_roundtrip_and_limits() {
         p.write_bytes(0xAB, 64);
         g.dealloc(p, layout);
 
-        // Unsupported layout returns null, never panics.
+        // Requests beyond the small classes go through the large-run path.
         let big = Layout::from_size_align(SPAN_SIZE, 8).unwrap();
-        assert!(g.alloc(big).is_null());
+        let bp = g.alloc(big);
+        assert!(!bp.is_null());
+        g.dealloc(bp, big);
+
+        // A request beyond the largest huge run class (> 4 GiB) is
+        // unsupported: null, never a panic.
+        let too_big = Layout::from_size_align(5usize << 30, 8).unwrap();
+        assert!(g.alloc(too_big).is_null());
     }
 
     // Cross-thread: each thread registers lazily via TLS; frees of another
