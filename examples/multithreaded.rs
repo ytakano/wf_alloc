@@ -21,6 +21,8 @@ use wf_alloc::{
 // their defaults, so only N needs to be specified.
 const N: usize = 4;
 const C: usize = MAX_SUPPORTED_CLASSES;
+const PAPER_PRIVATE_SPAN_CACHE_K: usize = LOCAL_SPAN_LIMIT_K;
+const PAPER_SIZED_REGION_SPANS: usize = N * C * PAPER_PRIVATE_SPAN_CACHE_K;
 
 fn main() {
     local_alloc_free();
@@ -32,7 +34,7 @@ fn main() {
 fn local_alloc_free() {
     // Pin the allocator in a leaked Box so it lives for the duration of the
     // program and its address never changes after init().
-    let region = Box::leak(Box::new(OwnedRegion::new(64)));
+    let region = Box::leak(Box::new(OwnedRegion::new(PAPER_SIZED_REGION_SPANS)));
     let alloc: &'static WfSpanAllocator = Box::leak(Box::new(WfSpanAllocator::new(N)));
     // Safety: called once before any thread touches the allocator;
     // the leaked allocation guarantees the allocator never moves.
@@ -95,7 +97,7 @@ fn local_alloc_free() {
 // ── Part 2: producers allocate; a single consumer frees remotely ──────────────
 
 fn remote_free() {
-    let region = Box::leak(Box::new(OwnedRegion::new(128)));
+    let region = Box::leak(Box::new(OwnedRegion::new(PAPER_SIZED_REGION_SPANS)));
     let alloc: &'static WfSpanAllocator = Box::leak(Box::new(WfSpanAllocator::new(N)));
     // Safety: as above.
     unsafe { alloc.init(region.ptr(), region.len()) };

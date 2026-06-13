@@ -92,6 +92,18 @@ risks.
 
 ## Known residual risks
 
+- Hosted `GlobalAlloc` wrapper (`global`): the
+  wrapper adds a hidden header to every allocation, creates wfspan shards with
+  `std::alloc::System`, and falls back to `System` when wfspan cannot serve a
+  request. The wrapper validates its hidden header before backend dispatch;
+  debug builds assert on bad magic, backend, layout, offset, or null wfspan
+  shard, while release builds return early for invalid wrapper headers. This
+  does not relax the `GlobalAlloc` safety contract: callers must pass only
+  pointers allocated by this allocator with the original layout. The
+  wfspan-served allocation/free paths retain the core bounds, but shard
+  creation, TLS token binding/destruction, cross-shard service-token frees,
+  destructor-time System fallback, and ordinary System fallback are hosted glue
+  and are not wait-free.
 - Targets other than x86_64 and aarch64 unsupported (compile error) —
   see docs/wfspan-model.md.
 - On the aarch64 LL/SC backend (built without `target-feature=+lse`),

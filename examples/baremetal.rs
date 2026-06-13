@@ -41,17 +41,10 @@ const C: usize = MAX_SUPPORTED_CLASSES;
 
 /// Number of spans reserved in the static backing region.
 ///
-/// Raw spans are never returned to the fixed pool; once handed out they
-/// circulate through the per-thread SPMC span-lists.  Therefore the pool
-/// only needs to cover spans that are simultaneously "live" before steady-
-/// state recycling kicks in.
-///
-/// A safe lower bound is `actual_n × C` — one span per active core per size
-/// class to survive a cold start where no recycled spans are yet available.
-/// Here `actual_n = 4` and `C = 11`, giving exactly 44.  For workloads with
-/// higher concurrency or burst allocation, scale up toward `actual_n * C * K`
-/// (`K = LOCAL_SPAN_LIMIT_K`) to accommodate per-thread local-list retention.
-const NUM_SPANS: usize = 44;
+/// This example sizes the pool for the paper's private span cache parameter:
+/// `K = LOCAL_SPAN_LIMIT_K = 40` private spans per active core per size class.
+/// Since the active core count is discovered at runtime, reserve for `MAX_N`.
+const NUM_SPANS: usize = MAX_N * C * LOCAL_SPAN_LIMIT_K;
 
 // ── Static backing memory ──────────────────────────────────────────────────────
 //

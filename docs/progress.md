@@ -88,6 +88,17 @@ Treiber-stack implementation would have spun), and
 huge test suites. This is an empirical guardrail against accidental
 unbounded loops, not a proof.
 
+## Hosted `GlobalAlloc` wrapper boundary
+
+The `global` feature provides a hosted `GlobalAlloc` wrapper around the core
+allocator. A wfspan-served allocation or deallocation still routes through the
+core bounded operations after a thread has a shard token. The wrapper itself is
+not a wait-free proof boundary: shard creation, TLS token binding/destruction,
+reserved service-token frees, `std::alloc::System` fallback, and
+destructor-time fallback are hosted support paths and may allocate, spin, or
+call the system allocator. Diagnostics expose these paths so production tests
+can detect unexpected fallback or shard growth.
+
 ## Failure (null) semantics
 
 Wait-freedom bounds steps, not success. Within its budget a thread may

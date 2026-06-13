@@ -13,6 +13,10 @@ default = ["std"]
 # std test/bench harness helpers (region provisioning, quiescent verifier).
 # Build with --no-default-features for a no_std-friendly core.
 std = []
+# Hosted GlobalAlloc wrapper for std targets.
+global = ["std"]
+# Backward-compatible alias for the branch-local experimental feature name.
+experimental-global = ["global"]
 # Extra runtime statistics (currently stats are always on; reserved).
 stats = []
 # Reserved for loom model testing (not wired up yet; see docs/progress.md).

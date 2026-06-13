@@ -26,6 +26,10 @@ need.
   metadata storage without `Box` or an existing heap allocator.
 - **Token-based API** with explicit per-thread registration for std tests
   and direct `token_from_raw` support for RTOS/bare-metal deployments.
+- **Hosted global allocator** behind `global`.
+  It builds dynamic wfspan shards on demand, reuses per-thread tokens after
+  thread exit, and falls back to `std::alloc::System` for requests that the
+  wfspan core cannot serve.
 - **x86_64 and aarch64**: the SPMC list pop uses a versioned CAS2. On
   x86_64 this is `lock cmpxchg16b`; on aarch64 it is `caspal` when built
   with `target-feature=+lse` (strong CAS, on by default for e.g. Apple
@@ -110,6 +114,33 @@ let (alloc_value, metadata_used) = unsafe {
 only enough bytes for `active_threads` local heaps and help rows; inactive
 CPU ids get no initialized local heap.
 
+## `GlobalAlloc` wrapper
+
+The `global` feature exposes `global::HostedLazyGlobalWfSpanAllocator`. It can
+be installed as a hosted std global allocator:
+
+```rust
+use wf_alloc::global::{GlobalAllocatorConfig, HostedLazyGlobalWfSpanAllocator};
+
+#[global_allocator]
+static ALLOC: HostedLazyGlobalWfSpanAllocator =
+    HostedLazyGlobalWfSpanAllocator::with_config(GlobalAllocatorConfig::new(16, 1024));
+```
+
+The config fields are `threads_per_shard` and `region_spans`;
+`HostedLazyGlobalWfSpanAllocator::new(threads_per_shard, region_spans)` remains
+as a shorthand. Each shard reserves one internal service token plus
+`threads_per_shard` reusable user tokens, and uses `region_spans * 64 KiB` of
+wfspan backing memory. Threads borrow a token
+through TLS and return it when the thread exits. If all shards are full or a
+wfspan region is too small for the request, the wrapper creates another shard
+using `std::alloc::System` for metadata and backing memory. Requests that are
+too large for wfspan, or cannot be served by a newly created shard, fall back
+to `System`. Shards and their backing regions are retained for the process
+lifetime; the wrapper does not shrink or reclaim shards. A hidden
+per-allocation header records the backend so deallocation works from arbitrary
+threads.
+
 ## Examples
 
 - [`examples/multithreaded.rs`](examples/multithreaded.rs) — std setup,
@@ -119,12 +150,17 @@ CPU ids get no initialized local heap.
 - [`examples/baremetal.rs`](examples/baremetal.rs) — no_std/bare-metal
   pattern: static aligned region, runtime CPU count, and no metadata for
   inactive CPU ids. `cargo run --example baremetal`
+- [`examples/global_wrapper.rs`](examples/global_wrapper.rs) — hosted
+  `#[global_allocator]` use of `global::HostedLazyGlobalWfSpanAllocator`.
+  `cargo run --features global --example global_wrapper`
 
 ## Feature flags
 
 | Feature | Default | Effect |
 |---|---|---|
 | `std` | yes | test/bench harness helpers (`region`, `verify`) |
+| `global` | no | hosted `GlobalAlloc` wrapper (requires std TLS) |
+| `experimental-global` | no | compatibility alias for `global` |
 | `stats`, `loom`, `nightly` | no | reserved (stats are currently always on; loom is not wired up) |
 
 ## Testing and verification
@@ -164,12 +200,14 @@ invariants after each test.
 This is a research prototype, not a production allocator:
 
 - x86_64 and AArch64 only; other architectures fail to compile.
-- Fixed, caller-provided memory region; exhaustion returns null (the
-  wait-free path never calls the OS). Raw spans are never returned to the
-  pool — they recirculate through per-thread lists.
-- Maximum single request: 4 GiB (the largest huge run class).
-- At most `active_threads` registered threads; this count is chosen at
-  runtime when constructing the allocator.
+- The core `WfSpanAllocator` has a fixed, caller-provided memory region;
+  exhaustion returns null (the wait-free path never calls the OS). Raw spans
+  are never returned to the pool — they recirculate through per-thread lists.
+- The core `WfSpanAllocator` supports at most `active_threads` registered
+  threads and a maximum wfspan-served request of 4 GiB (the largest huge run
+  class). The hosted `GlobalAlloc` wrapper relaxes those hosted
+  constraints by adding shards dynamically and falling back to `System`, but
+  allocations served by `System` are not wait-free wfspan operations.
 - No `realloc`, no NUMA awareness, no cross-process use.
 - Concurrency confidence comes from smoke tests, step-bound assertions,
   Miri (sequential paths), and the invariant checker — loom model checking
