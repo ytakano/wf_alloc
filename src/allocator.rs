@@ -1,14 +1,18 @@
 //! `WfSpanAllocator`: token-based wait-free allocation and deallocation.
 //!
-//! Const parameters: `N` = maximum participating threads, `C` = number of
-//! size classes used (must be <= MAX_SUPPORTED_CLASSES).
+//! Runtime parameter: active participating threads. Const parameter `C` =
+//! number of size classes used (must be <= MAX_SUPPORTED_CLASSES).
 //!
 //! Allocator-core rules (see docs/progress.md): no unbounded loops — every
-//! loop is bounded by N, C, P (= N), H, K, or blocks_per_span; no
-//! Vec/Box/String/format!/println!; no Mutex/RwLock; no OS allocation on
-//! the wait-free path.
+//! loop is bounded by active thread count, C, P (= active thread count), H, K,
+//! or blocks_per_span. Runtime metadata allocation happens only in
+//! [`WfSpanAllocator::new`]; the wait-free alloc/dealloc paths do not allocate
+//! metadata and do not call the OS.
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::alloc::Layout;
+use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 
 use crate::acquire::spanlists_acquire_span;
@@ -16,20 +20,22 @@ use crate::atomic_backend::DefaultCas2Backend;
 use crate::block::{Block, block_from_payload};
 use crate::config::{LOCAL_SPAN_LIMIT_K, OWNER_NONE, OWNER_PUBLIC};
 use crate::heap::ThreadHeap;
-use crate::help_record::HelpTable;
+use crate::help_record::{HelpRecord, HelpTable};
 use crate::huge::HugeArena;
+use crate::metadata::RuntimeSlice;
 use crate::pagemap::FixedSpanPool;
+use crate::remote_mpsc::append_remote_to_local_bounded;
 use crate::size_class::{class_to_size, size_to_class};
 use crate::span::{
     SpanHeader, SpanState, alloc_from_local_span, dealloc_to_local_span, init_span, span_from_ptr,
 };
-use crate::remote_mpsc::append_remote_to_local_bounded;
 use crate::stats::{AllocatorStats, StepCounter, theoretical_extra_bound};
 use crate::thread::{ThreadRegistry, ThreadToken};
 
 /// Token-based wait-free span allocator.
 ///
-/// `N` is the maximum number of participating threads; `C` is the number of
+/// The runtime `active_threads` value is the number of participating
+/// threads; `C` is the number of
 /// supported power-of-two size classes (1 ≤ `C` ≤ [`MAX_SUPPORTED_CLASSES`]);
 /// `HUGE_GRANULE_SPANS` is the huge-allocation granule in spans (default
 /// 16384 spans = 1 GiB) — requests of at least one granule dispatch to the
@@ -43,24 +49,20 @@ use crate::thread::{ThreadRegistry, ThreadToken};
 ///
 /// See the [crate-level documentation](crate) for a complete quick-start example.
 pub struct WfSpanAllocator<
-    const N: usize,
     const C: usize = { crate::config::MAX_SUPPORTED_CLASSES },
     const HUGE_GRANULE_SPANS: usize = { crate::config::DEFAULT_HUGE_GRANULE_SPANS },
 > {
-    pub heaps: [ThreadHeap<C>; N],
-    pub help: HelpTable<N, C>,
+    pub heaps: RuntimeSlice<ThreadHeap<C>>,
+    pub help: HelpTable<C>,
     pub pool: FixedSpanPool,
     pub registry: ThreadRegistry,
     pub stats: AllocatorStats,
     pub huge: HugeArena,
 }
 
-impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
-    WfSpanAllocator<N, C, HUGE_GRANULE_SPANS>
-{
+impl<const C: usize, const HUGE_GRANULE_SPANS: usize> WfSpanAllocator<C, HUGE_GRANULE_SPANS> {
     /// Compile-time parameter validation, forced in [`Self::new`].
     const VALID: () = {
-        assert!(N >= 1);
         assert!(C >= 1 && C <= crate::config::MAX_SUPPORTED_CLASSES);
         assert!(HUGE_GRANULE_SPANS >= 1);
         // The huge threshold must lie strictly above every small class.
@@ -77,18 +79,188 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// requests with `layout.size() >= HUGE_THRESHOLD` use the huge path.
     pub const HUGE_THRESHOLD: usize = HUGE_GRANULE_SPANS * crate::config::SPAN_SIZE;
 
-    /// Create an allocator with uninitialized (unlinked) SPMC lists.
-    /// [`Self::init`] must be called before use.
-    pub const fn new() -> Self {
+    /// Create an allocator for `active_threads` participating threads with
+    /// uninitialized (unlinked) SPMC lists. [`Self::init`] must be called
+    /// before use.
+    ///
+    /// This hosted convenience constructor allocates metadata storage up
+    /// front and leaks it for the allocator lifetime. Bare-metal bootstrap
+    /// code should use [`Self::from_uninit`] to provide storage without using
+    /// an existing heap allocator.
+    pub fn new(active_threads: usize) -> Self {
         let () = Self::VALID;
+        assert!(active_threads >= 1);
+
+        let mut heaps = Vec::with_capacity(active_threads);
+        for _ in 0..active_threads {
+            heaps.push(MaybeUninit::uninit());
+        }
+        let heaps = Box::leak(heaps.into_boxed_slice());
+
+        let mut records = Vec::with_capacity(active_threads);
+        let mut run_records = Vec::with_capacity(active_threads);
+        for _ in 0..active_threads {
+            records.push(MaybeUninit::uninit());
+            run_records.push(MaybeUninit::uninit());
+        }
+        let records = Box::leak(records.into_boxed_slice());
+        let run_records = Box::leak(run_records.into_boxed_slice());
+
+        // SAFETY: all leaked metadata storage lives for the process lifetime
+        // and will not move.
+        unsafe { Self::from_uninit(active_threads, heaps, records, run_records) }
+    }
+
+    /// Create an allocator in caller-provided metadata storage.
+    ///
+    /// This is the bootstrap-friendly constructor for bare-metal users of
+    /// wf_alloc itself: it does not call `Box`, `Vec`, or any heap allocator.
+    /// It initializes exactly `active_threads` heap/help rows from the start
+    /// of each slice, so inactive CPU ids do not get local heaps.
+    ///
+    /// # Safety
+    /// The initialized prefixes of all storage slices must outlive the
+    /// allocator and must not move while the allocator is in use. Call
+    /// [`Self::init`] exactly once before sharing the allocator.
+    pub unsafe fn from_uninit(
+        active_threads: usize,
+        heaps: &mut [MaybeUninit<ThreadHeap<C>>],
+        records: &mut [MaybeUninit<[HelpRecord; C]>],
+        run_records: &mut [MaybeUninit<[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]>],
+    ) -> Self {
+        let () = Self::VALID;
+        assert!(active_threads >= 1);
+        assert!(heaps.len() >= active_threads);
+        for slot in heaps.iter_mut().take(active_threads) {
+            slot.write(ThreadHeap::new());
+        }
         Self {
-            heaps: [const { ThreadHeap::new() }; N],
-            help: HelpTable::new(),
+            // SAFETY: initialized above; caller upholds lifetime/pinning.
+            heaps: unsafe {
+                RuntimeSlice::from_raw_parts(heaps.as_mut_ptr().cast(), active_threads)
+            },
+            // SAFETY: forwarded contract; this initializes exactly active_threads rows.
+            help: unsafe { HelpTable::from_uninit(active_threads, records, run_records) },
             pool: FixedSpanPool::new(),
-            registry: ThreadRegistry::new(N),
+            registry: ThreadRegistry::new(active_threads),
             stats: AllocatorStats::new(),
             huge: HugeArena::new(),
         }
+    }
+
+    /// Required alignment for the byte region passed to
+    /// [`Self::from_metadata_region`].
+    pub const fn metadata_region_align() -> usize {
+        max_usize(
+            core::mem::align_of::<ThreadHeap<C>>(),
+            max_usize(
+                core::mem::align_of::<[HelpRecord; C]>(),
+                core::mem::align_of::<[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]>(),
+            ),
+        )
+    }
+
+    /// Bytes required by [`Self::from_metadata_region`] for exactly
+    /// `active_threads` metadata rows, including internal alignment padding.
+    pub fn metadata_region_size(active_threads: usize) -> Option<usize> {
+        let (_, _, _, end) = Self::metadata_offsets(active_threads)?;
+        Some(end)
+    }
+
+    /// Create an allocator by carving exactly `active_threads` metadata rows
+    /// from a raw caller-provided byte region.
+    ///
+    /// Returns the allocator and the number of bytes consumed from
+    /// `metadata`. This constructor is intended for early bare-metal boot:
+    /// carve this prefix from SRAM or from the beginning of your heap arena,
+    /// then pass the remaining span-aligned memory to [`Self::init`]. It does
+    /// not use `Box`, `Vec`, or any existing heap allocator.
+    ///
+    /// # Safety
+    /// `metadata..metadata+metadata_len` must be valid writable memory that
+    /// outlives the allocator and remains pinned. The returned allocator must
+    /// be initialized with [`Self::init`] exactly once before use.
+    pub unsafe fn from_metadata_region(
+        active_threads: usize,
+        metadata: *mut u8,
+        metadata_len: usize,
+    ) -> Option<(Self, usize)> {
+        let () = Self::VALID;
+        if active_threads == 0
+            || metadata.is_null()
+            || (metadata as usize) % Self::metadata_region_align() != 0
+        {
+            return None;
+        }
+        let (heap_off, records_off, run_records_off, end) = Self::metadata_offsets(active_threads)?;
+        if end > metadata_len {
+            return None;
+        }
+
+        // SAFETY: offsets were computed with each target type's alignment and
+        // checked against metadata_len above; caller provides writable pinned memory.
+        let heap_ptr = unsafe { metadata.add(heap_off).cast::<ThreadHeap<C>>() };
+        let records_ptr = unsafe { metadata.add(records_off).cast::<[HelpRecord; C]>() };
+        let run_records_ptr = unsafe {
+            metadata
+                .add(run_records_off)
+                .cast::<[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]>()
+        };
+
+        for i in 0..active_threads {
+            // SAFETY: each slot lies in the non-overlapping carved region.
+            unsafe { heap_ptr.add(i).write(ThreadHeap::new()) };
+            unsafe { records_ptr.add(i).write([const { HelpRecord::new() }; C]) };
+            unsafe {
+                run_records_ptr
+                    .add(i)
+                    .write([const { HelpRecord::new() }; crate::config::MAX_LARGE_RUN_CLASSES])
+            };
+        }
+
+        let alloc = Self {
+            // SAFETY: initialized above; caller upholds lifetime/pinning.
+            heaps: unsafe { RuntimeSlice::from_raw_parts(heap_ptr, active_threads) },
+            // SAFETY: initialized above; caller upholds lifetime/pinning.
+            help: unsafe {
+                HelpTable::from_raw_parts(records_ptr, run_records_ptr, active_threads)
+            },
+            pool: FixedSpanPool::new(),
+            registry: ThreadRegistry::new(active_threads),
+            stats: AllocatorStats::new(),
+            huge: HugeArena::new(),
+        };
+        Some((alloc, end))
+    }
+
+    fn metadata_offsets(active_threads: usize) -> Option<(usize, usize, usize, usize)> {
+        if active_threads == 0 {
+            return None;
+        }
+        let mut offset = 0usize;
+        let heap_off = align_up_usize(offset, core::mem::align_of::<ThreadHeap<C>>())?;
+        offset = heap_off
+            .checked_add(core::mem::size_of::<ThreadHeap<C>>().checked_mul(active_threads)?)?;
+
+        let records_off = align_up_usize(offset, core::mem::align_of::<[HelpRecord; C]>())?;
+        offset = records_off
+            .checked_add(core::mem::size_of::<[HelpRecord; C]>().checked_mul(active_threads)?)?;
+
+        let run_records_off = align_up_usize(
+            offset,
+            core::mem::align_of::<[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]>(),
+        )?;
+        offset = run_records_off.checked_add(
+            core::mem::size_of::<[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]>()
+                .checked_mul(active_threads)?,
+        )?;
+
+        Some((heap_off, records_off, run_records_off, offset))
+    }
+
+    #[inline]
+    pub fn active_threads(&self) -> usize {
+        self.heaps.len()
     }
 
     /// Wire up the self-referential SPMC list dummies and install the
@@ -107,14 +279,14 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(4)));
     /// // Must be called exactly once before sharing across threads.
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// # }
     /// ```
     pub unsafe fn init(&self, region: *mut u8, len: usize) {
-        // Bounded loops: N * (C + MAX_LARGE_RUN_CLASSES).
-        for heap in &self.heaps {
+        // Bounded loops: active_threads * (C + MAX_LARGE_RUN_CLASSES).
+        for heap in self.heaps.iter() {
             for list in &heap.public_spans {
                 // SAFETY: pre-share, called once per contract.
                 unsafe { list.init() };
@@ -128,7 +300,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
         unsafe { self.pool.set_region(region, len) };
     }
 
-    /// Register the calling thread; None after N registrations.
+    /// Register the calling thread; None after `active_threads` registrations.
     ///
     /// # Examples
     ///
@@ -138,12 +310,12 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<2>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(2)));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     ///
     /// let t0 = alloc.register_thread(); // first registration
     /// let t1 = alloc.register_thread(); // second registration
-    /// let t2 = alloc.register_thread(); // exceeds N=2, returns None
+    /// let t2 = alloc.register_thread(); // exceeds active_threads=2, returns None
     /// assert!(t0.is_some());
     /// assert!(t1.is_some());
     /// assert!(t2.is_none());
@@ -154,18 +326,20 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     }
 
     /// Paper's approximate bound on ADDITIONAL footprint (bytes) beyond
-    /// what a fully linearizable allocator would hold, with P = N.
+    /// what a fully linearizable allocator would hold, with P = active thread count.
     ///
     /// # Examples
     ///
     /// ```
     /// use wf_alloc::WfSpanAllocator;
     ///
-    /// let bound = WfSpanAllocator::<4>::theoretical_extra_bound();
+    /// let alloc = WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(4);
+    /// let bound = alloc.theoretical_extra_bound();
     /// assert!(bound > 0);
     /// ```
-    pub const fn theoretical_extra_bound() -> usize {
-        theoretical_extra_bound(N, C, crate::config::SPAN_SIZE, N)
+    pub fn theoretical_extra_bound(&self) -> usize {
+        let n = self.active_threads();
+        theoretical_extra_bound(n, C, crate::config::SPAN_SIZE, n)
     }
 
     /// Small-vs-large dispatch predicate: the size class if `layout` fits
@@ -195,7 +369,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(4)));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///
@@ -226,7 +400,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(4)));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///
@@ -257,7 +431,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
             return unsafe { self.alloc_large_with_token_counted(layout, token, step) };
         };
         let tid = token.id;
-        debug_assert!(tid < N);
+        debug_assert!(tid < self.active_threads());
         let list = &self.heaps[tid].local_spans[class];
 
         // 1. Rotate through privately held spans. Bounded: K + 1 iterations.
@@ -281,7 +455,11 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
                 }
                 // Nothing reusable now: rotate it out.
                 list.pop_front();
-                if (*span).local.pending_remote.load(Ordering::Relaxed).is_null()
+                if (*span)
+                    .local
+                    .pending_remote
+                    .load(Ordering::Relaxed)
+                    .is_null()
                     && self.try_discard(span, tid, step)
                 {
                     AllocatorStats::bump(&self.stats.discarded_spans);
@@ -296,7 +474,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
         // 2. Acquire a span from public SPMC span-lists (bounded helping).
         // SAFETY: tid is a valid registered id per token contract.
         let span = unsafe {
-            spanlists_acquire_span::<DefaultCas2Backend, N, C, HUGE_GRANULE_SPANS>(
+            spanlists_acquire_span::<DefaultCas2Backend, C, HUGE_GRANULE_SPANS>(
                 self, tid, class, step,
             )
         };
@@ -356,7 +534,7 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<4>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(4)));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///
@@ -566,7 +744,12 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     /// # Safety
     /// Caller thread must own `span`; span must be unlinked from any list,
     /// with empty local free-list and no pending chain.
-    unsafe fn try_discard(&self, span: *mut SpanHeader, tid: usize, step: &mut StepCounter) -> bool {
+    unsafe fn try_discard(
+        &self,
+        span: *mut SpanHeader,
+        tid: usize,
+        step: &mut StepCounter,
+    ) -> bool {
         // SAFETY: owner-side loads/stores on a span we exclusively own.
         unsafe {
             debug_assert!((*span).local.free.is_empty());
@@ -598,13 +781,16 @@ impl<const N: usize, const C: usize, const HUGE_GRANULE_SPANS: usize>
     }
 }
 
-impl<const N: usize, const C: usize, const HG: usize> Default for WfSpanAllocator<N, C, HG> {
-    fn default() -> Self {
-        Self::new()
-    }
+const fn max_usize(a: usize, b: usize) -> usize {
+    if a >= b { a } else { b }
+}
+
+fn align_up_usize(value: usize, align: usize) -> Option<usize> {
+    debug_assert!(align.is_power_of_two());
+    value.checked_add(align - 1).map(|v| v & !(align - 1))
 }
 
 // SAFETY: all shared state is atomics, SPMC/MPSC wait-free structures, or
 // owner-only fields whose handover is release/acquire synchronized.
-unsafe impl<const N: usize, const C: usize, const HG: usize> Send for WfSpanAllocator<N, C, HG> {}
-unsafe impl<const N: usize, const C: usize, const HG: usize> Sync for WfSpanAllocator<N, C, HG> {}
+unsafe impl<const C: usize, const HG: usize> Send for WfSpanAllocator<C, HG> {}
+unsafe impl<const C: usize, const HG: usize> Sync for WfSpanAllocator<C, HG> {}

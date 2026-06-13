@@ -6,7 +6,7 @@
 //! helping protocol and per-thread caches are bounded, but at GiB scale
 //! those bounds are unacceptable: a HelpRecord may strand one multi-GiB
 //! run per thread per class, and `local_runs` may retain up to K of them
-//! (guide B.13: with N = 64 that bound is already ~192 GiB). The huge path
+//! (guide B.13: with active_threads = 64 that bound is already ~192 GiB). The huge path
 //! therefore uses a **fixed directory of `HugeRunSlot`s** — no SPMC lists,
 //! no helping, no per-thread caches:
 //!
@@ -122,7 +122,7 @@ pub const fn huge_class_granules(class: usize) -> usize {
     1 << class
 }
 
-impl<const N: usize, const C: usize, const HG: usize> WfSpanAllocator<N, C, HG> {
+impl<const C: usize, const HG: usize> WfSpanAllocator<C, HG> {
     /// Bytes in one huge granule (= the huge dispatch threshold).
     pub const HUGE_GRANULE_BYTES: usize = HG * SPAN_SIZE;
 
@@ -236,7 +236,8 @@ impl<const N: usize, const C: usize, const HG: usize> WfSpanAllocator<N, C, HG> 
     ) -> *mut u8 {
         slot.owner.store(token.id, Ordering::Relaxed);
         slot.requested_size.store(layout.size(), Ordering::Relaxed);
-        slot.requested_align.store(layout.align(), Ordering::Relaxed);
+        slot.requested_align
+            .store(layout.align(), Ordering::Relaxed);
         // Pointer arithmetic (not int casts) keeps the run's provenance.
         let payload_off = round_up(base as usize, layout.align()) - base as usize;
         debug_assert!(

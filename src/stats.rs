@@ -40,9 +40,9 @@ impl StepCounter {
     /// use wf_alloc::region::OwnedRegion;
     /// use wf_alloc::size_class::{blocks_per_span, class_to_size};
     ///
-    /// const N: usize = 4;
+    /// const ACTIVE_THREADS: usize = 4;
     /// let region = OwnedRegion::new(16);
-    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<N>::new()));
+    /// let alloc = Box::leak(Box::new(WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(ACTIVE_THREADS)));
     /// unsafe { alloc.init(region.ptr(), region.len()) };
     /// let token = alloc.register_thread().unwrap();
     ///
@@ -53,7 +53,7 @@ impl StepCounter {
     ///
     /// // Verify this single allocation stayed within the wait-freedom bounds.
     /// let bps = blocks_per_span(class_to_size(0)); // class 0 = 16-byte blocks
-    /// step.assert_bounds(N, HELP_BUDGET_H, N, bps, LOCAL_SPAN_LIMIT_K);
+    /// step.assert_bounds(ACTIVE_THREADS, HELP_BUDGET_H, ACTIVE_THREADS, bps, LOCAL_SPAN_LIMIT_K);
     ///
     /// unsafe { alloc.dealloc_with_token(ptr, layout, token) };
     /// # }
@@ -234,7 +234,7 @@ impl Default for AllocatorStats {
 }
 
 /// Paper's approximate additional-footprint bound:
-/// `A(N) = (N + (ceil(N / P) + N - 1) * (N - 1)) * C * S`.
+/// `A_extra(a) = (a + (ceil(a / p) + a - 1) * (a - 1)) * c * s`.
 ///
 /// # Examples
 ///
@@ -242,7 +242,7 @@ impl Default for AllocatorStats {
 /// use wf_alloc::theoretical_extra_bound;
 /// use wf_alloc::SPAN_SIZE;
 ///
-/// // Bound for 4 threads, 8 size classes, with P = N = 4.
+/// // Bound for 4 active threads, 8 size classes, with P = A = 4.
 /// let bound = theoretical_extra_bound(4, 8, SPAN_SIZE, 4);
 /// assert!(bound > 0);
 /// ```

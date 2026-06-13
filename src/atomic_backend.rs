@@ -58,11 +58,7 @@ mod x86 {
     /// # Safety
     /// `dst` must be valid for read/write and 16-byte aligned.
     #[inline]
-    unsafe fn cmpxchg16b(
-        dst: *mut HeadWord,
-        current: HeadWord,
-        new: HeadWord,
-    ) -> (HeadWord, bool) {
+    unsafe fn cmpxchg16b(dst: *mut HeadWord, current: HeadWord, new: HeadWord) -> (HeadWord, bool) {
         let mut lo = current.ptr as u64;
         let mut hi = current.version as u64;
         let ok: u8;

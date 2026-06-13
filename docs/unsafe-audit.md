@@ -70,7 +70,7 @@ risks.
   Double free is detected only opportunistically in debug builds (list
   pattern asserts); in release builds it is documented caller UB, as in
   the paper's C-level model.
-- `ThreadRegistry::token_from_raw`: id < N, externally deduplicated.
+- `ThreadRegistry::token_from_raw`: id < active_threads, externally deduplicated.
 - `FixedSpanPool::set_region`: region valid, unused, outliving the
   allocator.
 
@@ -100,6 +100,6 @@ risks.
   lemma is best-effort. See docs/wfspan-model.md.
 - The quiescent verifier requires external quiescence; calling it
   concurrently is a (test-harness-only) race.
-- `GlobalAlloc` wrapper: threads beyond N cannot register; their frees
+- `GlobalAlloc` wrapper: threads beyond active_threads cannot register; their frees
   leak (never UB) and their allocs return null. Documented in
   `global.rs`.

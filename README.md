@@ -13,15 +13,17 @@ need.
 
 ## Highlights
 
-- **Wait-free allocation and deallocation.** Every loop is bounded by a
-  compile-time constant (`N`, `C`, `P`, `H`, `K`, …); a failed CAS is never
-  retried — the thread publishes a request and relies on bounded helping.
+- **Wait-free allocation and deallocation.** Every loop is bounded by
+  the runtime active thread count and fixed constants (`C`, `P`, `H`, `K`,
+  ...); a failed CAS is never retried — the thread publishes a request and relies on bounded helping.
   See [docs/progress.md](docs/progress.md) for the full bound table.
 - **Three allocation tiers, one memory region.** Small blocks, multi-span
   large runs, and GiB-scale huge runs are all carved from a single
-  caller-provided region. The allocator never calls the OS.
-- **`no_std`-friendly core.** Build with `--no-default-features`; the `std`
-  feature only adds test/bench harness helpers.
+  caller-provided region. The wait-free alloc/dealloc paths never call the OS; runtime metadata is initialized up front from caller-provided or hosted storage.
+- **Bootstrap-friendly core.** Build with `--no-default-features` for
+  `no_std`. Hosted code may use `new(active_threads)`, while bare-metal
+  boot code can use `from_metadata_region` / `from_uninit` to provide
+  metadata storage without `Box` or an existing heap allocator.
 - **Token-based API** plus an optional `GlobalAlloc` wrapper (`global`
   feature) with automatic per-thread registration.
 - **x86_64 and aarch64**: the SPMC list pop uses a versioned CAS2. On
@@ -39,12 +41,14 @@ use core::alloc::Layout;
 use wf_alloc::WfSpanAllocator;
 use wf_alloc::region::OwnedRegion;
 
-// Up to 4 threads; size classes and huge granule use their defaults.
-const N: usize = 4;
+// Four active threads; size classes and huge granule use their defaults.
+const ACTIVE_THREADS: usize = 4;
 
 // Pin the allocator in place; it must not move after init.
 let region = OwnedRegion::new(64); // 64 spans = 4 MiB backing memory
-let alloc = Box::leak(Box::new(WfSpanAllocator::<N>::new()));
+let alloc = Box::leak(Box::new(
+    WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(ACTIVE_THREADS),
+));
 unsafe { alloc.init(region.ptr(), region.len()) };
 
 // Each thread registers once to obtain a token.
@@ -63,8 +67,8 @@ dealloc, so every pointer is freed on the path that allocated it.
 
 | Request | Path | Mechanism | Alloc bound | Dealloc bound |
 |---|---|---|---|---|
-| ≤ 16 KiB | small | per-thread heaps, SPMC span-lists, bounded helping | O(N²) | O(1) |
-| > 16 KiB, < 1 GiB | large | whole runs of 2^r spans through the same SPMC + helping machinery | O(R·N²) | O(1) |
+| ≤ 16 KiB | small | per-thread heaps, SPMC span-lists, bounded helping | O(A^2) | O(1) |
+| > 16 KiB, < 1 GiB | large | whole runs of 2^r spans through the same SPMC + helping machinery | O(R*A^2) | O(1) |
 | ≥ 1 GiB (≤ 4 GiB) | huge | fixed slot directory, one claim CAS per slot, lazy carve | O(R_h·SLOTS) | O(R_h·SLOTS) |
 
 The huge tier deliberately avoids the helping protocol and per-thread
@@ -75,14 +79,36 @@ caches: at GiB granularity their (bounded) retention would be absurd
 
 ```rust
 WfSpanAllocator<
-    const N: usize,                          // max participating threads
-    const C: usize = 11,                     // small size classes: 16 B … 16 KiB
+    const C: usize = 11,                     // small size classes: 16 B ... 16 KiB
     const HUGE_GRANULE_SPANS: usize = 16384, // huge granule: 1 GiB (= huge threshold)
 >
 ```
 
-`WfSpanAllocator<4>` is a complete configuration: 4 threads, all 11 small
-classes, 1 GiB huge granule. Parameters are validated at compile time.
+`WfSpanAllocator::<11>::new(active_threads)` creates exactly
+`active_threads` local heaps and help-record rows. `C` and
+`HUGE_GRANULE_SPANS` are validated at compile time; `active_threads >= 1`
+is checked at construction.
+
+
+### Bare-metal bootstrap without `Box`
+
+When wf_alloc is the heap allocator being brought up, `Box` is not available
+yet. Use a raw metadata region instead:
+
+```rust
+let (alloc_value, metadata_used) = unsafe {
+    WfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::from_metadata_region(
+        active_threads,
+        metadata_ptr,
+        metadata_len,
+    ).unwrap()
+};
+```
+
+`metadata_ptr` must be aligned to
+`WfSpanAllocator::<C>::metadata_region_align()`. The constructor consumes
+only enough bytes for `active_threads` local heaps and help rows; inactive
+CPU ids get no initialized local heap.
 
 ## `GlobalAlloc` wrapper (feature `global`)
 
@@ -94,17 +120,20 @@ use wf_alloc::global::GlobalWfSpanAllocator;
 struct AlignedRegion([u8; 128 * 65536]);
 static mut REGION: AlignedRegion = AlignedRegion([0u8; 128 * 65536]);
 
-#[global_allocator]
-static ALLOC: GlobalWfSpanAllocator<8> = GlobalWfSpanAllocator::new();
-
-// Call once before any heap allocation (e.g., early in `main`).
-fn setup() {
-    unsafe { ALLOC.init((&raw mut REGION.0).cast::<u8>(), 128 * 65536) };
+fn setup(
+    active_threads: usize,
+) -> &'static GlobalWfSpanAllocator<{ wf_alloc::MAX_SUPPORTED_CLASSES }> {
+    let alloc = Box::leak(Box::new(GlobalWfSpanAllocator::new(active_threads)));
+    unsafe { alloc.init((&raw mut REGION.0).cast::<u8>(), 128 * 65536) };
+    alloc
 }
 ```
 
-Threads register automatically on first use. Threads beyond `N` cannot
-register: their allocations return null and their frees leak (never UB).
+Threads register automatically on first use. Threads beyond `active_threads` cannot register: their allocations return
+null and their frees leak (never UB). Because the wrapper now sizes metadata
+at runtime, it is no longer `const`-constructible as a plain
+`#[global_allocator] static`; a static global allocator would need
+caller-provided static metadata storage.
 
 ## Examples
 
@@ -113,8 +142,8 @@ register: their allocations return null and their frees leak (never UB).
   remote frees, quiescent invariant check.
   `cargo run --example multithreaded`
 - [`examples/baremetal.rs`](examples/baremetal.rs) — no_std/bare-metal
-  pattern: static aligned region, `const fn new()` in `.bss`, runtime CPU
-  count with `token_from_raw`. `cargo run --example baremetal`
+  pattern: static aligned region, runtime CPU count, and no metadata for
+  inactive CPU ids. `cargo run --example baremetal`
 
 ## Feature flags
 
@@ -152,7 +181,7 @@ invariants after each test.
 - [docs/invariants.md](docs/invariants.md) — state-machine and ownership
   invariants the code maintains
 - [docs/memory-footprint.md](docs/memory-footprint.md) — bounded extra
-  memory: the paper's A(N) bound and the per-tier retention sources
+  memory: the paper's active-thread bound and the per-tier retention sources
 - [docs/unsafe-audit.md](docs/unsafe-audit.md) — every unsafe category and
   its justification; Miri status
 
@@ -165,7 +194,8 @@ This is a research prototype, not a production allocator:
   wait-free path never calls the OS). Raw spans are never returned to the
   pool — they recirculate through per-thread lists.
 - Maximum single request: 4 GiB (the largest huge run class).
-- At most `N` threads (compile-time constant).
+- At most `active_threads` registered threads; this count is chosen at
+  runtime when constructing the allocator.
 - No `realloc`, no NUMA awareness, no cross-process use.
 - Concurrency confidence comes from smoke tests, step-bound assertions,
   Miri (sequential paths), and the invariant checker — loom model checking

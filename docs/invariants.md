@@ -20,7 +20,7 @@ local ones online.
 
 - After `init_span`, `size_class`, `block_size`, `block_count` never change
   (spans are never re-typed in the prototype).
-- `owner` is a thread id `< N`, `OWNER_NONE` (discarded), or `OWNER_PUBLIC`
+- `owner` is a thread id `< active_threads`, `OWNER_NONE` (discarded), or `OWNER_PUBLIC`
   (in a public list or help record / in transit).
 - An owned span is in exactly one local span-list — its owner's, filed
   under its own size class.

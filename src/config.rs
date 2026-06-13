@@ -1,4 +1,4 @@
-//! Fixed implementation parameters (paper: SPAN_SIZE = 64 KiB, K = 40, H = 1, P = N).
+//! Fixed implementation parameters (paper: SPAN_SIZE = 64 KiB, K = 40, H = 1, P = active thread count).
 
 /// Size of one span. Must be a power of two.
 pub const SPAN_SIZE: usize = 64 * 1024;
@@ -6,9 +6,6 @@ pub const SPAN_SIZE: usize = 64 * 1024;
 /// Spans are aligned to their own size so the owning span of any block
 /// pointer can be recovered by masking low address bits (no pagemap needed).
 pub const SPAN_ALIGN: usize = SPAN_SIZE;
-
-/// Default maximum number of participating threads (N for the default config).
-pub const MAX_THREADS: usize = 64;
 
 /// Maximum number of private spans a thread heap retains per size class
 /// before it starts publishing surplus full spans to its public SPMC list.

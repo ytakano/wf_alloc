@@ -18,9 +18,9 @@ const N: usize = 2;
 const C: usize = 8;
 
 /// Single region serving both the small-span and large-run paths.
-fn setup(spans: usize) -> (&'static WfSpanAllocator<N, C>, OwnedRegion) {
+fn setup(spans: usize) -> (&'static WfSpanAllocator<C>, OwnedRegion) {
     let region = OwnedRegion::new(spans);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once, before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -255,7 +255,11 @@ fn publish_then_acquire_via_helping() {
         unsafe { alloc.dealloc_with_token(p, layout, token_a) };
     }
     assert!(
-        alloc.stats.published_runs.load(std::sync::atomic::Ordering::Relaxed) >= 4,
+        alloc
+            .stats
+            .published_runs
+            .load(std::sync::atomic::Ordering::Relaxed)
+            >= 4,
         "surplus runs must be published"
     );
 
@@ -267,7 +271,11 @@ fn publish_then_acquire_via_helping() {
     assert!(!p.is_null(), "public run acquisition failed");
     step.assert_large_bounds(N, HELP_BUDGET_H, N, MAX_LARGE_RUN_CLASSES);
     assert!(
-        alloc.stats.acquired_public_runs.load(std::sync::atomic::Ordering::Relaxed) >= 1,
+        alloc
+            .stats
+            .acquired_public_runs
+            .load(std::sync::atomic::Ordering::Relaxed)
+            >= 1,
         "run must come from a public list"
     );
     // SAFETY: freed once.
@@ -334,9 +342,9 @@ fn public_large_run_acquire_64k_and_1m() {
 /// Verify the exact small/large dispatch boundary with all small classes.
 #[test]
 fn size_class_boundary() {
-    type FullAlloc = WfSpanAllocator<2, MAX_SUPPORTED_CLASSES>;
+    type FullAlloc = WfSpanAllocator<MAX_SUPPORTED_CLASSES>;
     let region = OwnedRegion::new(8);
-    let alloc: &'static FullAlloc = Box::leak(Box::new(FullAlloc::new()));
+    let alloc: &'static FullAlloc = Box::leak(Box::new(FullAlloc::new(2)));
     // SAFETY: init once, before sharing.
     unsafe { alloc.init(region.ptr(), region.len()) };
     let token = alloc.register_thread().unwrap();

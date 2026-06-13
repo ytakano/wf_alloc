@@ -5,7 +5,7 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-/// Identity of a registered thread; `id < N`.
+/// Identity of a registered thread; `id < registry max`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ThreadToken {
     pub id: usize,
@@ -57,7 +57,7 @@ impl ThreadRegistry {
     /// RTOS where one heap is bound per core).
     ///
     /// # Safety
-    /// `id` must be `< N` and must not be used by two threads concurrently.
+    /// `id` must be `< registry max` and must not be used by two threads concurrently.
     ///
     /// # Examples
     ///

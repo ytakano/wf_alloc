@@ -17,9 +17,9 @@ use wf_alloc::{HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, class_to_size};
 const N: usize = 4;
 const C: usize = 4;
 
-fn setup(spans: usize) -> (&'static WfSpanAllocator<N, C>, &'static OwnedRegion) {
+fn setup(spans: usize) -> (&'static WfSpanAllocator<C>, &'static OwnedRegion) {
     let region = Box::leak(Box::new(OwnedRegion::new(spans)));
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once before sharing; leaked allocations never move.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -42,9 +42,7 @@ fn local_alloc_free_all_threads() {
                     for j in 0..64u64 {
                         let mut step = StepCounter::new();
                         // SAFETY: per-thread token.
-                        let p = unsafe {
-                            alloc.alloc_with_token_counted(layout, token, &mut step)
-                        };
+                        let p = unsafe { alloc.alloc_with_token_counted(layout, token, &mut step) };
                         step.assert_bounds(N, HELP_BUDGET_H, N, bps, LOCAL_SPAN_LIMIT_K);
                         assert!(!p.is_null());
                         let tag = (token.id as u64) << 48 | round << 16 | j;
@@ -86,8 +84,7 @@ fn producer_consumer_remote_free_heavy() {
                 for j in 0..20_000u64 {
                     let mut step = StepCounter::new();
                     // SAFETY: per-thread token.
-                    let p =
-                        unsafe { alloc.alloc_with_token_counted(layout, token, &mut step) };
+                    let p = unsafe { alloc.alloc_with_token_counted(layout, token, &mut step) };
                     step.assert_bounds(N, HELP_BUDGET_H, N, bps, LOCAL_SPAN_LIMIT_K);
                     if p.is_null() {
                         // Bounded pool + consumer lag can exhaust; that is
@@ -156,8 +153,7 @@ fn mixed_sizes_with_crossing_frees() {
                 let next = &txs[(i + 1) % N];
                 for j in 0..10_000usize {
                     let class = j % C;
-                    let layout =
-                        Layout::from_size_align(class_to_size(class), 8).unwrap();
+                    let layout = Layout::from_size_align(class_to_size(class), 8).unwrap();
                     // SAFETY: per-thread token.
                     let p = unsafe { alloc.alloc_with_token(layout, token) };
                     if !p.is_null() {

@@ -8,20 +8,22 @@ use std::sync::atomic::Ordering;
 use wf_alloc::DefaultCas2Backend;
 use wf_alloc::WfSpanAllocator;
 use wf_alloc::acquire::spanlists_acquire_span;
-use wf_alloc::config::{DEFAULT_HUGE_GRANULE_SPANS, HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, OWNER_PUBLIC};
+use wf_alloc::class_to_size;
+use wf_alloc::config::{
+    DEFAULT_HUGE_GRANULE_SPANS, HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, OWNER_PUBLIC,
+};
 use wf_alloc::help_record::{EncodedReq, help_finishing_req, reclaim_request};
 use wf_alloc::region::OwnedRegion;
 use wf_alloc::size_class::blocks_per_span;
 use wf_alloc::span::{SpanHeader, init_span};
 use wf_alloc::stats::StepCounter;
-use wf_alloc::class_to_size;
 
 const N: usize = 2;
 const C: usize = 4;
 
-fn setup(spans: usize) -> (&'static WfSpanAllocator<N, C>, OwnedRegion) {
+fn setup(spans: usize) -> (&'static WfSpanAllocator<C>, OwnedRegion) {
     let region = OwnedRegion::new(spans);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -29,7 +31,7 @@ fn setup(spans: usize) -> (&'static WfSpanAllocator<N, C>, OwnedRegion) {
 
 /// Make one PUBLIC span without putting it in any list (models a span a
 /// helper has already popped and holds exclusively).
-fn make_public_span(alloc: &WfSpanAllocator<N, C>) -> *mut SpanHeader {
+fn make_public_span(alloc: &WfSpanAllocator<C>) -> *mut SpanHeader {
     let mut step = StepCounter::new();
     let raw = alloc.pool.acquire_raw_span(&mut step);
     assert!(!raw.is_null());
@@ -38,7 +40,7 @@ fn make_public_span(alloc: &WfSpanAllocator<N, C>) -> *mut SpanHeader {
 }
 
 /// Make one PUBLIC span and enqueue it on heap 0's class-0 public list.
-fn publish_one(alloc: &WfSpanAllocator<N, C>) -> *mut SpanHeader {
+fn publish_one(alloc: &WfSpanAllocator<C>) -> *mut SpanHeader {
     let span = make_public_span(alloc);
     let mut step = StepCounter::new();
     // SAFETY: enqueue as the list's unique producer (single-threaded setup).
@@ -130,9 +132,19 @@ fn acquire_via_own_pop_and_via_helper() {
     // Own pop path: acquire finds the span on heap 0's public list.
     let mut step = StepCounter::new();
     // SAFETY: tid 1 used only by this thread; allocator initialized.
-    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step) };
+    let got = unsafe {
+        spanlists_acquire_span::<DefaultCas2Backend, C, DEFAULT_HUGE_GRANULE_SPANS>(
+            alloc, 1, 0, &mut step,
+        )
+    };
     assert_eq!(got, span);
-    step.assert_bounds(N, HELP_BUDGET_H, N, blocks_per_span(class_to_size(0)), LOCAL_SPAN_LIMIT_K);
+    step.assert_bounds(
+        N,
+        HELP_BUDGET_H,
+        N,
+        blocks_per_span(class_to_size(0)),
+        LOCAL_SPAN_LIMIT_K,
+    );
 
     // Helper-completed path: pre-complete the record (as a helper would),
     // then acquire must reclaim it without touching any list.
@@ -156,13 +168,13 @@ fn acquire_via_own_pop_and_via_helper() {
     assert!(held.is_null());
     let mut step2 = StepCounter::new();
     // SAFETY: as above.
-    let got2 =
-        unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step2) };
+    let got2 = unsafe {
+        spanlists_acquire_span::<DefaultCas2Backend, C, DEFAULT_HUGE_GRANULE_SPANS>(
+            alloc, 1, 0, &mut step2,
+        )
+    };
     assert_eq!(got2, span2, "completed record must be reclaimed first");
-    assert_eq!(
-        alloc.stats.help_record_reclaimed.load(Ordering::Relaxed),
-        1
-    );
+    assert_eq!(alloc.stats.help_record_reclaimed.load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -183,13 +195,21 @@ fn one_request_two_spans_is_recoverable() {
 
     let mut step = StepCounter::new();
     // SAFETY: tid 1 single-threaded here.
-    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step) };
+    let got = unsafe {
+        spanlists_acquire_span::<DefaultCas2Backend, C, DEFAULT_HUGE_GRANULE_SPANS>(
+            alloc, 1, 0, &mut step,
+        )
+    };
     assert_eq!(got, span_a, "reclaim-before-publish must win");
 
     // Next acquire still finds span_b via the normal pop path: no span lost.
     let mut step = StepCounter::new();
     // SAFETY: as above.
-    let got = unsafe { spanlists_acquire_span::<DefaultCas2Backend, N, C, DEFAULT_HUGE_GRANULE_SPANS>(alloc, 1, 0, &mut step) };
+    let got = unsafe {
+        spanlists_acquire_span::<DefaultCas2Backend, C, DEFAULT_HUGE_GRANULE_SPANS>(
+            alloc, 1, 0, &mut step,
+        )
+    };
     assert_eq!(got, span_b);
 
     // In-flight variant: a helper completes the request while the requester

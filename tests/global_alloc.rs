@@ -14,8 +14,7 @@ const C: usize = 4;
 #[test]
 fn global_alloc_roundtrip_and_limits() {
     let region = Box::leak(Box::new(OwnedRegion::new(16)));
-    let g: &'static GlobalWfSpanAllocator<N, C> =
-        Box::leak(Box::new(GlobalWfSpanAllocator::new()));
+    let g: &'static GlobalWfSpanAllocator<C> = Box::leak(Box::new(GlobalWfSpanAllocator::new(N)));
     // SAFETY: init once before sharing; leaked box never moves.
     unsafe { g.init(region.ptr(), region.len()) };
 
@@ -65,8 +64,7 @@ fn global_alloc_roundtrip_and_limits() {
 #[test]
 fn registration_exhaustion_returns_null() {
     let region = Box::leak(Box::new(OwnedRegion::new(4)));
-    let g: &'static GlobalWfSpanAllocator<1, C> =
-        Box::leak(Box::new(GlobalWfSpanAllocator::new()));
+    let g: &'static GlobalWfSpanAllocator<C> = Box::leak(Box::new(GlobalWfSpanAllocator::new(1)));
     // SAFETY: init once before sharing.
     unsafe { g.init(region.ptr(), region.len()) };
     let layout = Layout::from_size_align(64, 8).unwrap();

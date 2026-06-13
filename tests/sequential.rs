@@ -12,9 +12,9 @@ use wf_alloc::{SPAN_SIZE, class_to_size};
 const N: usize = 2;
 const C: usize = 8;
 
-fn setup(spans: usize) -> (&'static WfSpanAllocator<N, C>, OwnedRegion) {
+fn setup(spans: usize) -> (&'static WfSpanAllocator<C>, OwnedRegion) {
     let region = OwnedRegion::new(spans);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once, before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -126,7 +126,10 @@ fn oversized_layouts_served_from_single_region() {
     let layout = Layout::from_size_align(wf_alloc::MAX_LARGE_SIZE + 1, 8).unwrap();
     // SAFETY: valid token.
     let p = unsafe { alloc.alloc_with_token(layout, token) };
-    assert!(p.is_null(), "request beyond the huge classes must return null");
+    assert!(
+        p.is_null(),
+        "request beyond the huge classes must return null"
+    );
 
     // A 4 GiB request maps to huge class 2 (header-less: exactly
     // MAX_HUGE_GRANULES granules), but this 16-span region cannot back the
@@ -145,6 +148,6 @@ fn registration_bounded() {
     let (alloc, _region) = setup(1);
     assert!(alloc.register_thread().is_some());
     assert!(alloc.register_thread().is_some());
-    // registration fails after MAX_THREADS (N = 2)
+    // registration fails after active_threads = 2
     assert!(alloc.register_thread().is_none());
 }

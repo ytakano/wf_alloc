@@ -3,9 +3,9 @@
 use std::alloc::Layout;
 
 use wf_alloc::WfSpanAllocator;
+use wf_alloc::class_to_size;
 use wf_alloc::region::OwnedRegion;
 use wf_alloc::size_class::blocks_per_span;
-use wf_alloc::class_to_size;
 
 const N: usize = 2;
 const C: usize = 2;
@@ -13,7 +13,7 @@ const C: usize = 2;
 #[test]
 fn exhaust_free_exhaust_again() {
     let region = OwnedRegion::new(3);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
     let token = alloc.register_thread().unwrap();

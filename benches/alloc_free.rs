@@ -28,7 +28,7 @@ fn percentiles(mut ns: Vec<u64>, label: &str) {
 
 fn main() {
     let region = OwnedRegion::new(512);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once, before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
     let layout = Layout::from_size_align(64, 8).unwrap();
@@ -54,7 +54,7 @@ fn main() {
     percentiles(lat, "single-thread alloc+free");
 
     // N-1 additional threads, local alloc/free.
-    let alloc_ref: &'static WfSpanAllocator<N, C> = alloc;
+    let alloc_ref: &'static WfSpanAllocator<C> = alloc;
     let handles: Vec<_> = (1..N)
         .map(|_| {
             std::thread::spawn(move || {

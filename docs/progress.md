@@ -9,34 +9,34 @@ constraints and shows where each is enforced.
 |---|---|---|
 | `try_pop_head_once` | O(1): exactly one CAS2 attempt, no retry | `spmc_span_list.rs` (single `compare_exchange`, three return paths) |
 | `help_finishing_req` | O(1): ≤ 1 pop attempt + ≤ 1 CAS | `help_record.rs` |
-| published helping request | O(((N−1)/H)·(N−1) + 1) completions by others | helping loop in `acquire.rs` |
-| `spanlists_acquire_span` | O(N²) with H = 1, P = N | `acquire.rs`: help loop ≤ H + P iterations, query loop ≤ P iterations |
+| published helping request | O(((A-1)/H)*(A-1) + 1) completions by others | helping loop in `acquire.rs` |
+| `spanlists_acquire_span` | O(A^2) with H = 1, P = A | `acquire.rs`: help loop ≤ H + P iterations, query loop ≤ P iterations |
 | allocation | bounded by `spanlists_acquire_span` + K-bounded rotation | `allocator.rs::alloc_with_token_counted` |
 | deallocation | O(1): local push, or SWAP + link + FAA + ≤ 1 CAS | `allocator.rs::dealloc_local/dealloc_remote` |
 | raw span acquisition | O(1): one FAA | `pagemap.rs` |
 | raw run acquisition | O(1): one FAA + ≤ 1 rollback CAS (never retried) | `pagemap.rs::acquire_raw_run` |
-| `runlists_acquire_run` | O(N²) with H = 1, P = N (same shared core) | `acquire.rs::acquire_from_lists` |
-| large allocation | O(R · N²): ≤ R = MAX_LARGE_RUN_CLASSES class steps, each ≤ one acquire; one carve | `large.rs::alloc_large_with_token_counted` |
+| `runlists_acquire_run` | O(A^2) with H = 1, P = A (same shared core) | `acquire.rs::acquire_from_lists` |
+| large allocation | O(R * A^2): ≤ R = MAX_LARGE_RUN_CLASSES class steps, each ≤ one acquire; one carve | `large.rs::alloc_large_with_token_counted` |
 | large deallocation | O(1): header read + owner store + one push or one publish | `large.rs::dealloc_large_with_token_counted` |
 | huge allocation | O(R_h · SLOTS): ≤ 12 slot scans, ≤ 1 claim CAS each, ≤ 1 carve FAA per EMPTY claim | `huge.rs::alloc_huge_with_token_counted` |
 | huge deallocation | O(R_h · SLOTS): bounded directory reverse lookup + one release store, no CAS | `huge.rs::dealloc_huge_with_token_counted` |
 | remote-chain absorption | ≤ blocks_per_span per span | `remote_mpsc.rs::append_remote_to_local_bounded` |
 
-The paper's alternative wfqueue-style protocol with an O(N) bound is not
+The paper's alternative wfqueue-style protocol with an O(A) bound is not
 implemented.
 
 ## Allowed loop bounds
 
-Only loops statically bounded by one of: `N`, `C`, `P`, `H`, `K`,
+Only loops bounded by one of: active thread count `A`, `C`, `P`, `H`, `K`,
 `blocks_per_span` (plus exact-length list walks bounded by a maintained
 `len`). Audit points:
 
 - `alloc` rotation: `for _ in 0..=LOCAL_SPAN_LIMIT_K`
-- helping: `while help_count < H && help_query < N`
-- querying: `while help_query < N`
+- helping: `while help_count < H && help_query < active_threads`
+- querying: `while help_query < active_threads`
 - span init / remote absorption: `for _ in 0..block_count`
 - `remove_bounded`: `for _ in 0..limit` (limit = current list length)
-- allocator init: `N × (C + MAX_LARGE_RUN_CLASSES)`
+- allocator init: `A * (C + MAX_LARGE_RUN_CLASSES)`
 - large class search: `for class in min_class..MAX_LARGE_RUN_CLASSES`
 - huge slot scan: `for class in min_class..MAX_HUGE_RUN_CLASSES`,
   `for slot in 0..MAX_HUGE_RUNS_PER_CLASS` (alloc and dealloc lookup)
@@ -46,8 +46,8 @@ Only loops statically bounded by one of: `N`, `C`, `P`, `H`, `K`,
 GiB-scale requests must not flow through the large path's SPMC + helping
 machinery: a HelpRecord may strand one extra run per thread per class and
 `local_runs` retains up to K freed runs per thread per class — bounded,
-but at GiB granularity the bound is absurd (guide B.13: N = 64 threads ×
-3 classes × 1 GiB ≈ 192 GiB of stranded memory). The fixed slot directory
+but at GiB granularity the bound is absurd (guide B.13: A = 64 threads *
+3 classes * 1 GiB ~= 192 GiB of stranded memory). The fixed slot directory
 has no help records and no caches: a freed huge run is globally claimable
 after one store, and the worst-case retained memory is exactly the carved
 directory capacity.
@@ -68,18 +68,20 @@ so escalated classes use only list reuse (Policy 1).
 - `loop { compare_exchange }` / unbounded CAS retry — a failed one-shot pop
   routes into publish → help(≤H) → finish, never a retry.
 - Treiber-stack substitution for the SPMC list + helping.
-- `Vec`/`Box`/`String`/`format!`/`println!`, `Mutex`/`RwLock`, OS
-  allocation in the allocator core (`std` code lives only in
-  `region.rs`/`verify.rs`/benches/tests).
+- `Vec`/`Box`/`String`/`format!`/`println!`, `Mutex`/`RwLock`, or OS
+  allocation in the wait-free alloc/dealloc paths. `WfSpanAllocator::new`
+  may allocate hosted runtime metadata before the allocator is shared;
+  bare-metal code can use `from_metadata_region` or `from_uninit` to avoid
+  heap allocation during bootstrap.
 - Dropping a completed HelpRecord span; treating `UNLINKED` as corruption;
   splitting pointer/version into two atomics.
 
 ## StepCounter guardrail
 
 Every public alloc/dealloc path updates a `StepCounter`;
-`StepCounter::assert_bounds(N, H, P, blocks_per_span, K)` is asserted per
+`StepCounter::assert_bounds(A, H, P, blocks_per_span, K)` is asserted per
 operation in the concurrent smoke tests and the WCET-style bench, and
-`StepCounter::assert_large_bounds(N, H, P, R)` per large operation in the
+`StepCounter::assert_large_bounds(A, H, P, R)` per large operation in the
 large test suites (including under contention, where the removed
 Treiber-stack implementation would have spun), and
 `StepCounter::assert_huge_bounds(R_h, SLOTS)` per huge operation in the

@@ -18,13 +18,13 @@ use wf_alloc::{
 const N: usize = 4;
 const C: usize = 4;
 const HG: usize = 1;
-type HugeAlloc = WfSpanAllocator<N, C, HG>;
+type HugeAlloc = WfSpanAllocator<C, HG>;
 
 const GRANULE: usize = HG * SPAN_SIZE;
 
 fn setup(spans: usize) -> (&'static HugeAlloc, &'static OwnedRegion) {
     let region = Box::leak(Box::new(OwnedRegion::new(spans)));
-    let alloc = Box::leak(Box::new(HugeAlloc::new()));
+    let alloc = Box::leak(Box::new(HugeAlloc::new(N)));
     // SAFETY: init once, before sharing; both are leaked and never move.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -72,9 +72,7 @@ fn concurrent_huge_no_duplicate_slots() {
                     }
                     let mut step = StepCounter::new();
                     // SAFETY: freed once.
-                    unsafe {
-                        alloc.dealloc_with_token_counted(p, layout, token, &mut step)
-                    };
+                    unsafe { alloc.dealloc_with_token_counted(p, layout, token, &mut step) };
                     step.assert_huge_bounds(MAX_HUGE_RUN_CLASSES, MAX_HUGE_RUNS_PER_CLASS);
                 }
                 successes
@@ -151,7 +149,7 @@ fn mixed_three_paths_concurrent() {
                 let token = alloc.register_thread().unwrap();
                 barrier.wait();
                 let layout = match i % 3 {
-                    0 => Layout::from_size_align(64, 8).unwrap(), // small
+                    0 => Layout::from_size_align(64, 8).unwrap(),   // small
                     1 => Layout::from_size_align(4096, 8).unwrap(), // large
                     _ => Layout::from_size_align(GRANULE, 8).unwrap(), // huge
                 };

@@ -21,13 +21,13 @@ const C: usize = 4;
 /// Tiny granule: 1 span = 64 KiB. Threshold = 64 KiB; huge classes are
 /// 1/2/4 spans.
 const HG: usize = 1;
-type HugeAlloc = WfSpanAllocator<N, C, HG>;
+type HugeAlloc = WfSpanAllocator<C, HG>;
 
 const GRANULE: usize = HG * SPAN_SIZE;
 
 fn setup(spans: usize) -> (&'static HugeAlloc, OwnedRegion) {
     let region = OwnedRegion::new(spans);
-    let alloc = Box::leak(Box::new(HugeAlloc::new()));
+    let alloc = Box::leak(Box::new(HugeAlloc::new(N)));
     // SAFETY: init once, before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -233,7 +233,11 @@ fn mixed_three_paths_single_region() {
         }
     }
     for &(p, l, tag) in &live {
-        assert_eq!(unsafe { (p as *const u64).read() }, tag, "pattern corrupted");
+        assert_eq!(
+            unsafe { (p as *const u64).read() },
+            tag,
+            "pattern corrupted"
+        );
         // SAFETY: freed once.
         unsafe { alloc.dealloc_with_token(p, l, token) };
     }

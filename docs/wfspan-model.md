@@ -8,12 +8,12 @@ Rust prototype implements and the assumptions it makes.
 
 | Symbol | Meaning | Prototype value |
 |---|---|---|
-| `N` | Maximum number of participating threads | const generic (`WfSpanAllocator<N, C>`) |
+| `A` | Active participating threads | runtime value (`WfSpanAllocator::new(A)`) |
 | `C` | Number of size classes | const generic, ≤ 11 (`MAX_SUPPORTED_CLASSES`) |
 | `S` | Span size | 64 KiB (`SPAN_SIZE`), spans are `S`-aligned |
 | `K` | Per-thread private span limit per class | 40 (`LOCAL_SPAN_LIMIT_K`) |
 | `H` | Helping budget per acquisition | 1 (`HELP_BUDGET_H`) |
-| `P` | Public span-lists queried per acquisition | `N` (fixed; configurability is future work) |
+| `P` | Public span-lists queried per acquisition | `A` (fixed to active thread count; configurability is future work) |
 
 - **block** — the unit returned to the user. Power-of-two sizes
   16 B … 16 KiB; a free block stores its free-list link in its own memory.
@@ -31,6 +31,14 @@ Rust prototype implements and the assumptions it makes.
 - **help record** — one `AtomicUsize` per thread per class encoding
   empty / pending(phase) / completed(span pointer) (`help_record.rs`).
 
+## Runtime metadata
+
+`WfSpanAllocator::new(A)` is a hosted convenience constructor. For bootstrap
+or bare-metal use, `from_metadata_region(A, ...)` and `from_uninit(A, ...)`
+initialize exactly `A` local heaps and help-record rows in caller-provided
+storage, so inactive CPU ids do not have initialized local heaps. The
+wait-free alloc/dealloc paths do not allocate metadata.
+
 ## Why non-linearizability is acceptable
 
 Allocator-internal lists do not need to be linearizable queues; they need to
@@ -47,11 +55,11 @@ not lose memory and to keep "extra" unavailable memory bounded:
 
 ## How allocation stays bounded
 
-Every loop in the allocation path has a static bound (see docs/progress.md):
+Every loop in the allocation path has a finite bound (see docs/progress.md):
 local span rotation (≤ K+1), remote-chain absorption (≤ blocks_per_span),
-helping (≤ H), public-list queries (≤ P = N), raw-span FAA (1). A failed
+helping (<= H), public-list queries (<= P = A), raw-span FAA (1). A failed
 CAS2 pop is *never retried*; the thread publishes a request and relies on
-bounded helping. Total: O(N²) steps with H = 1, matching the paper.
+bounded helping. Total: O(A^2) steps with H = 1, matching the paper with `A` as the runtime participant count.
 
 ## How deallocation stays bounded
 
@@ -62,8 +70,8 @@ reclaim). No loops. O(1).
 ## How extra memory stays bounded
 
 See docs/memory-footprint.md; the paper's bound
-`A(N) = (N + (ceil(N/P) + N − 1)(N − 1)) · C · S` is exposed as
-`WfSpanAllocator::theoretical_extra_bound()`.
+`A_extra(A) = (A + (ceil(A/P) + A - 1)(A - 1)) * C * S` is exposed as
+`WfSpanAllocator::theoretical_extra_bound()` with `P = A`.
 
 ## Target architecture assumptions
 

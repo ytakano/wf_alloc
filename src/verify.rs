@@ -50,8 +50,8 @@ impl PageOccupancy {
 ///
 /// # Safety
 /// The allocator must be initialized and quiescent (no concurrent ops).
-pub unsafe fn check_quiescent<const N: usize, const C: usize, const HG: usize>(
-    alloc: &WfSpanAllocator<N, C, HG>,
+pub unsafe fn check_quiescent<const C: usize, const HG: usize>(
+    alloc: &WfSpanAllocator<C, HG>,
 ) -> (usize, usize, usize) {
     let mut seen: HashSet<usize> = HashSet::new();
     let mut pages = PageOccupancy {
@@ -86,15 +86,10 @@ pub unsafe fn check_quiescent<const N: usize, const C: usize, const HG: usize>(
             }
 
             for (class, list) in heap.public_spans.iter().enumerate() {
-                public += walk_public_list(
-                    list,
-                    span_limit,
-                    &mut seen,
-                    &mut |span| {
-                        check_span(span, None, class);
-                        pages.claim(span, 1);
-                    },
-                );
+                public += walk_public_list(list, span_limit, &mut seen, &mut |span| {
+                    check_span(span, None, class);
+                    pages.claim(span, 1);
+                });
             }
 
             for (class, list) in heap.local_runs.iter().enumerate() {
@@ -116,15 +111,10 @@ pub unsafe fn check_quiescent<const N: usize, const C: usize, const HG: usize>(
             }
 
             for (class, list) in heap.public_runs.iter().enumerate() {
-                public += walk_public_list(
-                    list,
-                    span_limit,
-                    &mut seen,
-                    &mut |run| {
-                        check_run(run, None, class);
-                        pages.claim(run, 1usize << class);
-                    },
-                );
+                public += walk_public_list(list, span_limit, &mut seen, &mut |run| {
+                    check_run(run, None, class);
+                    pages.claim(run, 1usize << class);
+                });
             }
         }
 
@@ -304,11 +294,19 @@ unsafe fn check_run(run: *mut SpanHeader, owner: Option<usize>, class: usize) {
         let st = (*run).state.load(Ordering::Relaxed);
         match owner {
             Some(tid) => {
-                assert_eq!((*run).owner.load(Ordering::Relaxed), tid, "run owner mismatch");
+                assert_eq!(
+                    (*run).owner.load(Ordering::Relaxed),
+                    tid,
+                    "run owner mismatch"
+                );
                 assert_eq!(st, SpanState::RunFreeLocal as usize, "local free run state");
             }
             None => {
-                assert_eq!(st, SpanState::RunFreePublic as usize, "public free run state");
+                assert_eq!(
+                    st,
+                    SpanState::RunFreePublic as usize,
+                    "public free run state"
+                );
             }
         }
         assert_eq!(

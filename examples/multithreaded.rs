@@ -33,8 +33,7 @@ fn local_alloc_free() {
     // Pin the allocator in a leaked Box so it lives for the duration of the
     // program and its address never changes after init().
     let region = Box::leak(Box::new(OwnedRegion::new(64)));
-    let alloc: &'static WfSpanAllocator<N> =
-        Box::leak(Box::new(WfSpanAllocator::new()));
+    let alloc: &'static WfSpanAllocator = Box::leak(Box::new(WfSpanAllocator::new(N)));
     // Safety: called once before any thread touches the allocator;
     // the leaked allocation guarantees the allocator never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
@@ -47,8 +46,7 @@ fn local_alloc_free() {
             std::thread::spawn(move || {
                 // Each thread registers once to obtain an exclusive token.
                 let token = alloc.register_thread().unwrap();
-                let layout =
-                    Layout::from_size_align(class_to_size(i % C), 8).unwrap();
+                let layout = Layout::from_size_align(class_to_size(i % C), 8).unwrap();
 
                 for round in 0..500u64 {
                     let mut ptrs: Vec<(*mut u8, u64)> = Vec::with_capacity(32);
@@ -57,9 +55,7 @@ fn local_alloc_free() {
                     for j in 0..32u64 {
                         let mut step = StepCounter::new();
                         // Safety: token is used exclusively by this thread.
-                        let p = unsafe {
-                            alloc.alloc_with_token_counted(layout, token, &mut step)
-                        };
+                        let p = unsafe { alloc.alloc_with_token_counted(layout, token, &mut step) };
                         // Assert that this single operation stayed within the
                         // wait-freedom step bounds from the paper.
                         step.assert_bounds(N, HELP_BUDGET_H, N, bps, LOCAL_SPAN_LIMIT_K);
@@ -100,8 +96,7 @@ fn local_alloc_free() {
 
 fn remote_free() {
     let region = Box::leak(Box::new(OwnedRegion::new(128)));
-    let alloc: &'static WfSpanAllocator<N> =
-        Box::leak(Box::new(WfSpanAllocator::new()));
+    let alloc: &'static WfSpanAllocator = Box::leak(Box::new(WfSpanAllocator::new(N)));
     // Safety: as above.
     unsafe { alloc.init(region.ptr(), region.len()) };
 

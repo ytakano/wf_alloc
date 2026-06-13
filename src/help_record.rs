@@ -8,9 +8,11 @@
 //! A completed record OWNS its span. It must never be overwritten without
 //! reclaiming the span first (`reclaim_request`).
 
+use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::atomic_backend::Cas2Backend;
+use crate::metadata::RuntimeSlice;
 use crate::span::SpanHeader;
 use crate::spmc_span_list::{SpmcSpanList, TryPop};
 use crate::stats::StepCounter;
@@ -71,24 +73,62 @@ impl Default for HelpRecord {
 
 /// Per-thread, per-size-class request table, plus a per-run-class table for
 /// the large path. Fixed arrays; no dynamic allocation in the allocator core.
-pub struct HelpTable<const N: usize, const C: usize> {
-    pub records: [[HelpRecord; C]; N],
-    pub run_records: [[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]; N],
+pub struct HelpTable<const C: usize> {
+    pub records: RuntimeSlice<[HelpRecord; C]>,
+    pub run_records: RuntimeSlice<[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]>,
 }
 
-impl<const N: usize, const C: usize> HelpTable<N, C> {
-    pub const fn new() -> Self {
+impl<const C: usize> HelpTable<C> {
+    /// Initialize exactly `n` help-record rows in caller-provided storage.
+    ///
+    /// # Safety
+    /// The initialized prefix of `records` and `run_records` must outlive the
+    /// allocator and must not be moved while it is in use.
+    pub unsafe fn from_uninit(
+        n: usize,
+        records: &mut [MaybeUninit<[HelpRecord; C]>],
+        run_records: &mut [MaybeUninit<[HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES]>],
+    ) -> Self {
+        assert!(n >= 1);
+        assert!(records.len() >= n);
+        assert!(run_records.len() >= n);
+        for i in 0..n {
+            records[i].write([const { HelpRecord::new() }; C]);
+            run_records[i]
+                .write([const { HelpRecord::new() }; crate::config::MAX_LARGE_RUN_CLASSES]);
+        }
         Self {
-            records: [const { [const { HelpRecord::new() }; C] }; N],
-            run_records:
-                [const { [const { HelpRecord::new() }; crate::config::MAX_LARGE_RUN_CLASSES] }; N],
+            // SAFETY: initialized above; caller upholds lifetime/pinning.
+            records: unsafe { RuntimeSlice::from_raw_parts(records.as_mut_ptr().cast(), n) },
+            // SAFETY: initialized above; caller upholds lifetime/pinning.
+            run_records: unsafe {
+                RuntimeSlice::from_raw_parts(run_records.as_mut_ptr().cast(), n)
+            },
         }
     }
-}
 
-impl<const N: usize, const C: usize> Default for HelpTable<N, C> {
-    fn default() -> Self {
-        Self::new()
+    /// # Safety
+    /// The provided pointers must reference initialized rows that outlive the
+    /// allocator and remain pinned.
+    pub const unsafe fn from_raw_parts(
+        records: *mut [HelpRecord; C],
+        run_records: *mut [HelpRecord; crate::config::MAX_LARGE_RUN_CLASSES],
+        n: usize,
+    ) -> Self {
+        Self {
+            // SAFETY: forwarded contract.
+            records: unsafe { RuntimeSlice::from_raw_parts(records, n) },
+            // SAFETY: forwarded contract.
+            run_records: unsafe { RuntimeSlice::from_raw_parts(run_records, n) },
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
     }
 }
 

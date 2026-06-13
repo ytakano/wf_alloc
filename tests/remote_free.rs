@@ -6,19 +6,19 @@ use std::sync::atomic::Ordering;
 
 use wf_alloc::WfSpanAllocator;
 use wf_alloc::block::{UNLINKED, block_from_payload};
+use wf_alloc::class_to_size;
 use wf_alloc::region::OwnedRegion;
 use wf_alloc::remote_mpsc::RemoteMpscFreeList;
 use wf_alloc::size_class::blocks_per_span;
 use wf_alloc::span::span_from_ptr;
 use wf_alloc::stats::StepCounter;
-use wf_alloc::class_to_size;
 
 const N: usize = 4;
 const C: usize = 4;
 
-fn setup(spans: usize) -> (&'static WfSpanAllocator<N, C>, OwnedRegion) {
+fn setup(spans: usize) -> (&'static WfSpanAllocator<C>, OwnedRegion) {
     let region = OwnedRegion::new(spans);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -109,7 +109,10 @@ fn producer_stalled_after_swap_blocks_then_recovers() {
     // The blocked suffix is stashed, not dropped.
     // SAFETY: owner-side read; quiescent.
     let pending = unsafe { (*span).local.pending_remote.load(Ordering::Relaxed) };
-    assert_eq!(pending, b0, "blocked chain must be stashed in pending_remote");
+    assert_eq!(
+        pending, b0,
+        "blocked chain must be stashed in pending_remote"
+    );
     // SAFETY: b0.next is UNLINKED right now.
     unsafe {
         assert_eq!((*b0).next.load(Ordering::Relaxed), UNLINKED);

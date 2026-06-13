@@ -8,23 +8,23 @@ measures it.
 
 1. **Spans left in HelpRecords.** One request can yield two spans; the
    extra one stays in the requester's record until its next acquisition.
-   ≤ 1 per thread per class → `N · C · S`.
+   <= 1 per thread per class -> `A * C * S`.
 2. **Span-list query failure.** A thread queries only `P` lists; available
    spans may be elsewhere, forcing a raw-span acquisition:
-   `(ceil(N/P) − 1) · (N − 1) · C · S`. With the prototype's fixed `P = N`
+   `(ceil(A/P) - 1) * (A - 1) * C * S`. With the prototype's fixed `P = A`
    this term is zero (making `P` configurable is listed future work).
 3. **MPSC remote-list blocking.** Producers halted between SWAP and link
    make a span's free blocks temporarily unreachable:
-   `N · (N − 1) · C · S` (span granularity).
+   `A * (A - 1) * C * S` (span granularity).
 
 Total (paper, approximate):
 
 ```
-A(N) = (N + (ceil(N / P) + N − 1) · (N − 1)) · C · S  =  O(N²) for P = N
+A_extra(A) = (A + (ceil(A / P) + A - 1) * (A - 1)) * C * S = O(A^2) for P = A
 ```
 
 Implemented as `stats::theoretical_extra_bound(n, c, s, p)` and
-`WfSpanAllocator::theoretical_extra_bound()` (with `P = N`).
+`WfSpanAllocator::theoretical_extra_bound()` (with `P = active_threads`).
 
 ## Observed statistics
 
@@ -95,6 +95,6 @@ DMA etc.) is the responsibility of whoever provides the region.
 
 ## Measurement plan beyond the prototype
 
-Benchmark with `P = N, N/2, N/4` once `P` is configurable, and track a
+Benchmark with `P = A, A/2, A/4` once `P` is configurable, and track a
 high-water `max_observed_spans` gauge (currently derivable from
 `spans_used`, since raw spans are never returned to the pool).

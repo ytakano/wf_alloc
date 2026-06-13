@@ -3,8 +3,8 @@
 
 use std::sync::atomic::Ordering;
 
-use wf_alloc::DefaultCas2Backend;
 use wf_alloc::Cas2Backend;
+use wf_alloc::DefaultCas2Backend;
 use wf_alloc::config::OWNER_PUBLIC;
 use wf_alloc::region::OwnedRegion;
 use wf_alloc::span::{SpanHeader, init_span};
@@ -181,5 +181,9 @@ fn concurrent_consumers_one_shot_pop() {
     // Every span popped exactly once; none lost, none duplicated.
     // (The MS-queue shape keeps the last node as dummy, so with concurrent
     // one-shot pops every span is eventually taken.)
-    assert_eq!(all.len(), SPANS, "spans lost or duplicated under contention");
+    assert_eq!(
+        all.len(),
+        SPANS,
+        "spans lost or duplicated under contention"
+    );
 }

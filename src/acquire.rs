@@ -1,7 +1,7 @@
 //! Bounded, helping-based acquisition from public SPMC lists (paper
 //! Algorithms 3 and 4), shared by the small-span and large-run paths.
 //!
-//! Flow (all loops statically bounded by H and P = N):
+//! Flow (all loops bounded by H and P = active thread count):
 //! 1. Reclaim a span already completed into this thread's HelpRecord.
 //! 2. Publish a new pending request (fresh phase).
 //! 3. Help at most H other pending requests.
@@ -44,24 +44,20 @@ struct AcquireStats<'a> {
 /// `OWNER_PUBLIC`; the caller claims ownership.
 ///
 /// # Safety
-/// `tid` must be a valid registered thread id (`< N`) used only by the
+/// `tid` must be a valid registered thread id (`< active thread count`) used only by the
 /// calling thread; the allocator must be initialized.
-pub unsafe fn spanlists_acquire_span<
-    B: Cas2Backend,
-    const N: usize,
-    const C: usize,
-    const HG: usize,
->(
-    alloc: &WfSpanAllocator<N, C, HG>,
+pub unsafe fn spanlists_acquire_span<B: Cas2Backend, const C: usize, const HG: usize>(
+    alloc: &WfSpanAllocator<C, HG>,
     tid: usize,
     size_class: usize,
     step: &mut StepCounter,
 ) -> *mut SpanHeader {
     let heap = &alloc.heaps[tid];
     // SAFETY: forwarded contract; the accessors index initialized lists and
-    // records of registered heaps (`i < N` by construction in the core).
+    // records of registered heaps (`i < active thread count` by construction in the core).
     unsafe {
-        acquire_from_lists::<B, N>(
+        acquire_from_lists::<B>(
+            alloc.active_threads(),
             &alloc.help.records[tid][size_class],
             &heap.cur_query[size_class],
             &heap.helping_pos[size_class],
@@ -86,13 +82,8 @@ pub unsafe fn spanlists_acquire_span<
 ///
 /// # Safety
 /// As for [`spanlists_acquire_span`]; `run_class < MAX_LARGE_RUN_CLASSES`.
-pub unsafe fn runlists_acquire_run<
-    B: Cas2Backend,
-    const N: usize,
-    const C: usize,
-    const HG: usize,
->(
-    alloc: &WfSpanAllocator<N, C, HG>,
+pub unsafe fn runlists_acquire_run<B: Cas2Backend, const C: usize, const HG: usize>(
+    alloc: &WfSpanAllocator<C, HG>,
     tid: usize,
     run_class: usize,
     step: &mut StepCounter,
@@ -100,7 +91,8 @@ pub unsafe fn runlists_acquire_run<
     let heap = &alloc.heaps[tid];
     // SAFETY: forwarded contract (see spanlists_acquire_span).
     unsafe {
-        acquire_from_lists::<B, N>(
+        acquire_from_lists::<B>(
+            alloc.active_threads(),
             &alloc.help.run_records[tid][run_class],
             &heap.cur_query_runs[run_class],
             &heap.helping_pos_runs[run_class],
@@ -125,7 +117,8 @@ pub unsafe fn runlists_acquire_run<
 /// `my_req == record_at(tid)` for the calling thread; all lists returned by
 /// `list_at` must be initialized; the calling thread must be the only user
 /// of `my_req`'s owner side.
-unsafe fn acquire_from_lists<'a, B: Cas2Backend, const N: usize>(
+unsafe fn acquire_from_lists<'a, B: Cas2Backend>(
+    n: usize,
     my_req: &'a HelpRecord,
     cur_query: &'a AtomicUsize,
     helping_pos: &'a AtomicUsize,
@@ -134,8 +127,9 @@ unsafe fn acquire_from_lists<'a, B: Cas2Backend, const N: usize>(
     stats: &AcquireStats<'a>,
     step: &mut StepCounter,
 ) -> *mut SpanHeader {
-    let mut query_pos = cur_query.load(Ordering::Relaxed) % N;
-    let mut helping = helping_pos.load(Ordering::Relaxed) % N;
+    debug_assert!(n >= 1);
+    let mut query_pos = cur_query.load(Ordering::Relaxed) % n;
+    let mut helping = helping_pos.load(Ordering::Relaxed) % n;
 
     let save = |query_pos: usize, helping: usize| {
         cur_query.store(query_pos, Ordering::Relaxed);
@@ -165,10 +159,10 @@ unsafe fn acquire_from_lists<'a, B: Cas2Backend, const N: usize>(
     // 3. Help at most H pending requests, sharing the P query budget.
     let mut help_count = 0usize;
     let mut help_query = 0usize;
-    while help_count < crate::config::HELP_BUDGET_H && help_query < N {
+    while help_count < crate::config::HELP_BUDGET_H && help_query < n {
         step.help_steps += 1;
-        let req = record_at(helping % N);
-        let target_list = list_at(query_pos % N);
+        let req = record_at(helping % n);
+        let target_list = list_at(query_pos % n);
 
         let req_state = EncodedReq(req.phase_pending_or_span.load(Ordering::Acquire));
         if req_state.is_pending() {
@@ -178,17 +172,17 @@ unsafe fn acquire_from_lists<'a, B: Cas2Backend, const N: usize>(
             };
             if list_is_null {
                 help_query += 1;
-                query_pos = (query_pos + 1) % N;
+                query_pos = (query_pos + 1) % n;
                 list_is_null = false;
                 continue;
             }
         }
         help_count += 1;
-        helping = (helping + 1) % N;
+        helping = (helping + 1) % n;
     }
 
-    // 4. Finish our own request, traversing at most P (= N) lists.
-    while help_query < N {
+    // 4. Finish our own request, traversing at most P (= active thread count) lists.
+    while help_query < n {
         step.query_steps += 1;
 
         let state = EncodedReq(my_req.phase_pending_or_span.load(Ordering::Acquire));
@@ -200,7 +194,7 @@ unsafe fn acquire_from_lists<'a, B: Cas2Backend, const N: usize>(
             return finish_with(my_req, stats, span, held_span);
         }
 
-        let target_list = list_at(query_pos % N);
+        let target_list = list_at(query_pos % n);
         // SAFETY: initialized list; held_span is exclusively ours.
         unsafe {
             help_finishing_req::<B>(target_list, my_req, &mut held_span, &mut list_is_null, step)
@@ -208,7 +202,7 @@ unsafe fn acquire_from_lists<'a, B: Cas2Backend, const N: usize>(
 
         if list_is_null {
             help_query += 1;
-            query_pos = (query_pos + 1) % N;
+            query_pos = (query_pos + 1) % n;
             list_is_null = false;
             continue;
         }
@@ -232,7 +226,7 @@ unsafe fn acquire_from_lists<'a, B: Cas2Backend, const N: usize>(
 
         // No progress on this list (pop Failed); spend query budget.
         help_query += 1;
-        query_pos = (query_pos + 1) % N;
+        query_pos = (query_pos + 1) % n;
     }
 
     // 5. Budget exhausted: clear our pending request if still pending.

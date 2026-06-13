@@ -78,12 +78,9 @@ impl FixedSpanPool {
         if i >= count || count - i < span_count {
             // Single rollback attempt; losing it is acceptable bounded waste.
             step.cas_attempts += 1;
-            let _ = self.next.compare_exchange(
-                i + span_count,
-                i,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            );
+            let _ =
+                self.next
+                    .compare_exchange(i + span_count, i, Ordering::Relaxed, Ordering::Relaxed);
             return core::ptr::null_mut();
         }
         (self.base.load(Ordering::Relaxed) + i * SPAN_SIZE) as *mut u8

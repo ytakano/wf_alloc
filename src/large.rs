@@ -84,7 +84,9 @@ pub const fn run_class_bytes(class: usize) -> usize {
 /// `None` if the request needs more than `MAX_LARGE_SPANS` spans (or
 /// overflows). Alignments larger than `SPAN_SIZE` are honored via slack.
 pub fn run_class_for_layout(layout: Layout) -> Option<usize> {
-    let align = layout.align().max(core::mem::align_of::<LargeAllocHeader>());
+    let align = layout
+        .align()
+        .max(core::mem::align_of::<LargeAllocHeader>());
     let needed = SPAN_HEADER_RESERVE
         .checked_add(HDR_SIZE)?
         .checked_add(align - 1)?
@@ -103,15 +105,12 @@ pub fn run_class_for_layout(layout: Layout) -> Option<usize> {
 /// `run` must be the initialized base header of a run of `run_class`
 /// exclusively owned by the caller, and `run_class` must be at least
 /// `run_class_for_layout(layout)`.
-unsafe fn place_large_payload(
-    run: *mut SpanHeader,
-    run_class: usize,
-    layout: Layout,
-) -> *mut u8 {
-    let align = layout.align().max(core::mem::align_of::<LargeAllocHeader>());
+unsafe fn place_large_payload(run: *mut SpanHeader, run_class: usize, layout: Layout) -> *mut u8 {
+    let align = layout
+        .align()
+        .max(core::mem::align_of::<LargeAllocHeader>());
     // Pointer arithmetic (not int casts) keeps the run's provenance.
-    let payload_off =
-        round_up(run as usize + SPAN_HEADER_RESERVE + HDR_SIZE, align) - run as usize;
+    let payload_off = round_up(run as usize + SPAN_HEADER_RESERVE + HDR_SIZE, align) - run as usize;
     // SAFETY: payload_off + layout.size() fits the run (see debug_asserts;
     // guaranteed by run_class_for_layout).
     let payload = unsafe { (run as *mut u8).add(payload_off) };
@@ -134,11 +133,11 @@ unsafe fn place_large_payload(
     payload
 }
 
-impl<const N: usize, const C: usize, const HG: usize> WfSpanAllocator<N, C, HG> {
+impl<const C: usize, const HG: usize> WfSpanAllocator<C, HG> {
     /// Large allocation (guide A.7, Policy 1). Bounded: at most
     /// `MAX_LARGE_RUN_CLASSES` class steps, each one local pop (O(1)) plus
     /// one helping acquisition (O(H + P)), plus one raw carve (one FAA, at
-    /// most one rollback CAS) — O(R · N) total, no retry loops.
+    /// most one rollback CAS) — O(R * A^2) total, no retry loops.
     ///
     /// # Safety
     /// As for [`Self::alloc_with_token`].
@@ -152,7 +151,7 @@ impl<const N: usize, const C: usize, const HG: usize> WfSpanAllocator<N, C, HG> 
             return core::ptr::null_mut();
         };
         let tid = token.id;
-        debug_assert!(tid < N);
+        debug_assert!(tid < self.active_threads());
 
         // Class search order per class (Policy 1):
         //   (a) own local free runs — exact-class reuse, zero waste, O(1);
@@ -174,7 +173,7 @@ impl<const N: usize, const C: usize, const HG: usize> WfSpanAllocator<N, C, HG> 
 
             // SAFETY: tid is a valid registered id per token contract.
             let run = unsafe {
-                runlists_acquire_run::<DefaultCas2Backend, N, C, HG>(self, tid, class, step)
+                runlists_acquire_run::<DefaultCas2Backend, C, HG>(self, tid, class, step)
             };
             if !run.is_null() {
                 // SAFETY: acquire hands us exclusive ownership of `run`.
@@ -208,12 +207,7 @@ impl<const N: usize, const C: usize, const HG: usize> WfSpanAllocator<N, C, HG> 
     /// # Safety
     /// `run` must be an initialized run header of class `class`, exclusively
     /// owned by the calling thread and in no list.
-    unsafe fn finish_large(
-        &self,
-        run: *mut SpanHeader,
-        class: usize,
-        layout: Layout,
-    ) -> *mut u8 {
+    unsafe fn finish_large(&self, run: *mut SpanHeader, class: usize, layout: Layout) -> *mut u8 {
         // SAFETY: exclusive ownership per contract.
         unsafe {
             debug_assert_eq!((*run).size_class.load(Ordering::Relaxed), class);

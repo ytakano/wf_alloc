@@ -148,10 +148,7 @@ pub unsafe fn init_span(
             (*b).next.store(head, Ordering::Relaxed);
             head = b;
         }
-        (*span)
-            .local
-            .free
-            .push_chain_head_for_init(head, count);
+        (*span).local.free.push_chain_head_for_init(head, count);
         (*span).local.free_count.store(count, Ordering::Relaxed);
     }
     span

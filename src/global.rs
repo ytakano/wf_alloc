@@ -1,9 +1,8 @@
 //! Optional `GlobalAlloc` wrapper (feature = "global").
 //!
 //! Added only on top of the working token-based core, per the roadmap.
-//! Restrictions honored inside these paths: no Box/Vec/String/format!/
-//! println!, no Mutex/RwLock, no recursive allocation, no panicking.
-//! Unsupported layouts, unregistered threads (beyond N), and exhaustion
+//! Unsupported layouts, unregistered threads (beyond the configured active
+//! thread count), and exhaustion
 //! all return null.
 
 use core::alloc::{GlobalAlloc, Layout};
@@ -29,20 +28,16 @@ use crate::thread::ThreadToken;
 /// struct AlignedRegion([u8; 128 * 65536]);
 /// static mut REGION: AlignedRegion = AlignedRegion([0u8; 128 * 65536]);
 ///
-/// #[global_allocator]
-/// static ALLOC: GlobalWfSpanAllocator<8> = GlobalWfSpanAllocator::new();
-///
-/// // Call once before any heap allocation (e.g., early in `main`).
 /// fn setup() {
-///     unsafe { ALLOC.init((&raw mut REGION.0).cast::<u8>(), 128 * 65536) };
+///     let alloc = GlobalWfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(8);
+///     unsafe { alloc.init((&raw mut REGION.0).cast::<u8>(), 128 * 65536) };
 /// }
 /// ```
 pub struct GlobalWfSpanAllocator<
-    const N: usize,
     const C: usize = { crate::config::MAX_SUPPORTED_CLASSES },
     const HUGE_GRANULE_SPANS: usize = { crate::config::DEFAULT_HUGE_GRANULE_SPANS },
 > {
-    pub inner: WfSpanAllocator<N, C, HUGE_GRANULE_SPANS>,
+    pub inner: WfSpanAllocator<C, HUGE_GRANULE_SPANS>,
 }
 
 std::thread_local! {
@@ -51,11 +46,8 @@ std::thread_local! {
     static THREAD_TOKEN_ID: Cell<usize> = const { Cell::new(usize::MAX) };
 }
 
-impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C, HG> {
-    /// Create a new, uninitialized allocator.
-    ///
-    /// This is a `const fn` so it can be used in a `static` initializer before
-    /// [`init`](Self::init) is called.
+impl<const C: usize, const HG: usize> GlobalWfSpanAllocator<C, HG> {
+    /// Create a new, uninitialized allocator for `active_threads` threads.
     ///
     /// # Examples
     ///
@@ -63,11 +55,11 @@ impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C
     /// // Requires `features = ["global"]`.
     /// use wf_alloc::global::GlobalWfSpanAllocator;
     ///
-    /// static ALLOC: GlobalWfSpanAllocator<4> = GlobalWfSpanAllocator::new();
+    /// let alloc = GlobalWfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(4);
     /// ```
-    pub const fn new() -> Self {
+    pub fn new(active_threads: usize) -> Self {
         Self {
-            inner: WfSpanAllocator::new(),
+            inner: WfSpanAllocator::new(active_threads),
         }
     }
 
@@ -81,7 +73,7 @@ impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C
     }
 
     /// Token for the current thread, registering it on first use.
-    /// None once N threads are registered (or if TLS is gone).
+    /// None once `active_threads` threads are registered (or if TLS is gone).
     ///
     /// # Examples
     ///
@@ -91,7 +83,7 @@ impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C
     /// use wf_alloc::region::OwnedRegion;
     ///
     /// let region = OwnedRegion::new(16);
-    /// let g = Box::leak(Box::new(GlobalWfSpanAllocator::<4>::new()));
+    /// let g = Box::leak(Box::new(GlobalWfSpanAllocator::<{ wf_alloc::MAX_SUPPORTED_CLASSES }>::new(4)));
     /// unsafe { g.init(region.ptr(), region.len()) };
     ///
     /// // First call registers this thread; subsequent calls return the cached token.
@@ -118,18 +110,8 @@ impl<const N: usize, const C: usize, const HG: usize> GlobalWfSpanAllocator<N, C
     }
 }
 
-impl<const N: usize, const C: usize, const HG: usize> Default
-    for GlobalWfSpanAllocator<N, C, HG>
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // SAFETY: GlobalAlloc requires Sync; the inner allocator is Sync.
-unsafe impl<const N: usize, const C: usize, const HG: usize> GlobalAlloc
-    for GlobalWfSpanAllocator<N, C, HG>
-{
+unsafe impl<const C: usize, const HG: usize> GlobalAlloc for GlobalWfSpanAllocator<C, HG> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match self.current_thread_token() {
             // SAFETY: token is valid for this thread; forwarded contract.
@@ -145,6 +127,6 @@ unsafe impl<const N: usize, const C: usize, const HG: usize> GlobalAlloc
             unsafe { self.inner.dealloc_with_token(ptr, layout, token) }
         }
         // A thread that can no longer register cannot free; with a bounded
-        // N this is documented as a leak, never UB.
+        // active thread count this is documented as a leak, never UB.
     }
 }

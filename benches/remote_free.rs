@@ -15,10 +15,10 @@ const OPS: usize = 100_000;
 
 fn main() {
     let region = OwnedRegion::new(1024);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
-    let alloc_ref: &'static WfSpanAllocator<N, C> = alloc;
+    let alloc_ref: &'static WfSpanAllocator<C> = alloc;
     let layout = Layout::from_size_align(64, 8).unwrap();
 
     let (tx, rx) = mpsc::sync_channel::<usize>(4096);

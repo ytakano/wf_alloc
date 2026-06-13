@@ -5,10 +5,10 @@
 use std::alloc::Layout;
 use std::sync::atomic::Ordering;
 
-use wf_alloc::stats::StepCounter;
 use wf_alloc::WfSpanAllocator;
 use wf_alloc::region::OwnedRegion;
 use wf_alloc::size_class::blocks_per_span;
+use wf_alloc::stats::StepCounter;
 use wf_alloc::{HELP_BUDGET_H, LOCAL_SPAN_LIMIT_K, class_to_size};
 
 const N: usize = 8;
@@ -17,10 +17,10 @@ const ROUNDS: usize = 20_000;
 
 fn main() {
     let region = OwnedRegion::new(256);
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once before sharing; leaked box never moves.
     unsafe { alloc.init(region.ptr(), region.len()) };
-    let alloc_ref: &'static WfSpanAllocator<N, C> = alloc;
+    let alloc_ref: &'static WfSpanAllocator<C> = alloc;
     let layout = Layout::from_size_align(class_to_size(0), 8).unwrap();
     let bps = blocks_per_span(class_to_size(0));
 
@@ -94,7 +94,7 @@ fn main() {
     );
     println!(
         "theoretical extra bound: {} bytes",
-        WfSpanAllocator::<N, C>::theoretical_extra_bound()
+        alloc_ref.theoretical_extra_bound()
     );
     std::mem::forget(region);
 }

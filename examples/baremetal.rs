@@ -21,6 +21,7 @@
 //! Run with: `cargo run --example baremetal`
 
 use core::alloc::Layout;
+use core::mem::MaybeUninit;
 
 use wf_alloc::size_class::{blocks_per_span, class_to_size};
 use wf_alloc::{
@@ -48,7 +49,7 @@ const C: usize = MAX_SUPPORTED_CLASSES;
 /// A safe lower bound is `actual_n × C` — one span per active core per size
 /// class to survive a cold start where no recycled spans are yet available.
 /// Here `actual_n = 4` and `C = 11`, giving exactly 44.  For workloads with
-/// higher concurrency or burst allocation, scale up toward `N × C × K`
+/// higher concurrency or burst allocation, scale up toward `actual_n * C * K`
 /// (`K = LOCAL_SPAN_LIMIT_K`) to accommodate per-thread local-list retention.
 const NUM_SPANS: usize = 44;
 
@@ -65,13 +66,22 @@ struct AlignedRegion([u8; NUM_SPANS * SPAN_SIZE]);
 
 static mut REGION: AlignedRegion = AlignedRegion([0u8; NUM_SPANS * SPAN_SIZE]);
 
-// ── Allocator ─────────────────────────────────────────────────────────────────
+// ── Allocator metadata ─────────────────────────────────────────────────────────
 //
-// `WfSpanAllocator::new()` is `const fn`, so this static is placed in .bss
-// with no runtime constructor.  `ALLOC.init()` must be called once at boot
-// before any core calls `alloc_with_token` or `dealloc_with_token`.
+// No Box is used here. The allocator object and its runtime-sized metadata are
+// placement-initialized during boot. `from_metadata_region` consumes only the
+// prefix needed for `actual_n`; the rest of this buffer is unused. A production
+// port can instead carve this prefix from a linker-provided SRAM/heap arena.
 
-static ALLOC: WfSpanAllocator<MAX_N> = WfSpanAllocator::new();
+const METADATA_ALIGN: usize = 64;
+const METADATA_BYTES: usize = 64 * 1024;
+const _: () = assert!(WfSpanAllocator::<C>::metadata_region_align() <= METADATA_ALIGN);
+
+#[repr(align(64))]
+struct AlignedMetadata([u8; METADATA_BYTES]);
+
+static mut METADATA: AlignedMetadata = AlignedMetadata([0u8; METADATA_BYTES]);
+static mut ALLOC_SLOT: MaybeUninit<WfSpanAllocator> = MaybeUninit::uninit();
 
 // ── Runtime CPU detection ──────────────────────────────────────────────────────
 
@@ -94,15 +104,30 @@ fn main() {
         "hardware reported more CPUs ({actual_n}) than MAX_N ({MAX_N})"
     );
 
+    // SAFETY: METADATA and ALLOC_SLOT are static and never move. This code runs
+    // once during boot before any core can use the allocator.
+    let (alloc_value, metadata_used) = unsafe {
+        WfSpanAllocator::<C>::from_metadata_region(
+            actual_n,
+            (&raw mut METADATA.0).cast::<u8>(),
+            METADATA_BYTES,
+        )
+        .expect("metadata region is too small or misaligned")
+    };
+    let alloc: &'static WfSpanAllocator = unsafe {
+        let slot = &raw mut ALLOC_SLOT;
+        (*slot).write(alloc_value)
+    };
+
     // Initialize the allocator once at boot, before any core uses it.
-    // Safety: called exactly once; both ALLOC and REGION are static and
-    // therefore never move for the lifetime of the program.
+    // Safety: called exactly once; alloc and REGION are static and never move.
     unsafe {
-        ALLOC.init((&raw mut REGION.0).cast::<u8>(), NUM_SPANS * SPAN_SIZE);
+        alloc.init((&raw mut REGION.0).cast::<u8>(), NUM_SPANS * SPAN_SIZE);
     }
 
     println!(
-        "Boot: {actual_n}/{MAX_N} CPUs active, {NUM_SPANS} spans ({} KiB) available",
+        "Boot: {actual_n}/{MAX_N} CPUs active, metadata={} bytes, {NUM_SPANS} spans ({} KiB) available",
+        metadata_used,
         NUM_SPANS * SPAN_SIZE / 1024,
     );
 
@@ -112,7 +137,7 @@ fn main() {
     let mut handles = Vec::with_capacity(actual_n);
     for cpu_id in 0..actual_n {
         handles.push(std::thread::spawn(move || {
-            core_main(cpu_id, actual_n);
+            core_main(alloc, cpu_id, actual_n);
         }));
     }
 
@@ -127,13 +152,13 @@ fn main() {
 
 // ── Per-core entry point ───────────────────────────────────────────────────────
 
-fn core_main(cpu_id: usize, active_cores: usize) {
+fn core_main(alloc: &'static WfSpanAllocator, cpu_id: usize, active_cores: usize) {
     // Build a token directly from the CPU hardware ID.
     // This avoids the `register_thread()` FAA; the contract is that cpu_id is
     // unique per running core and never shared between two concurrent callers.
     //
-    // Safety: cpu_id < MAX_N; each cpu_id is used by exactly one hardware core.
-    let token = unsafe { ALLOC.registry.token_from_raw(cpu_id) };
+    // Safety: cpu_id < active_cores; each cpu_id is used by exactly one hardware core.
+    let token = unsafe { alloc.registry.token_from_raw(cpu_id) };
 
     // Choose a size class that varies across cores to exercise multiple classes.
     let class = cpu_id % C;
@@ -143,7 +168,7 @@ fn core_main(cpu_id: usize, active_cores: usize) {
     for _ in 0..200 {
         let mut step = StepCounter::new();
         // Safety: token is exclusively owned by this core.
-        let p = unsafe { ALLOC.alloc_with_token_counted(layout, token, &mut step) };
+        let p = unsafe { alloc.alloc_with_token_counted(layout, token, &mut step) };
 
         if p.is_null() {
             // The fixed pool is exhausted.  On bare-metal this is a valid
@@ -152,7 +177,7 @@ fn core_main(cpu_id: usize, active_cores: usize) {
         }
 
         // Verify that this single allocation stayed within the wait-freedom
-        // step bounds derived in the paper (N = active_cores here).
+        // step bounds derived in the paper (`A = active_cores` here).
         step.assert_bounds(
             active_cores,
             HELP_BUDGET_H,
@@ -171,7 +196,7 @@ fn core_main(cpu_id: usize, active_cores: usize) {
                 cpu_id as u64,
                 "memory pattern corrupted — possible double-allocation"
             );
-            ALLOC.dealloc_with_token(p, layout, token);
+            alloc.dealloc_with_token(p, layout, token);
         }
     }
 }

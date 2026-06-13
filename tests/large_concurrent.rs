@@ -11,9 +11,7 @@ use std::alloc::Layout;
 use std::sync::{Barrier, mpsc};
 
 use wf_alloc::region::OwnedRegion;
-use wf_alloc::{
-    HELP_BUDGET_H, MAX_LARGE_RUN_CLASSES, StepCounter, WfSpanAllocator,
-};
+use wf_alloc::{HELP_BUDGET_H, MAX_LARGE_RUN_CLASSES, StepCounter, WfSpanAllocator};
 
 const N: usize = 4;
 const C: usize = 4;
@@ -22,9 +20,9 @@ const C: usize = 4;
 /// class_to_size(3) = 128 bytes, so 4 KiB always dispatches large.
 const LARGE_SIZE: usize = 4096;
 
-fn setup(spans: usize) -> (&'static WfSpanAllocator<N, C>, &'static OwnedRegion) {
+fn setup(spans: usize) -> (&'static WfSpanAllocator<C>, &'static OwnedRegion) {
     let region = Box::leak(Box::new(OwnedRegion::new(spans)));
-    let alloc = Box::leak(Box::new(WfSpanAllocator::<N, C>::new()));
+    let alloc = Box::leak(Box::new(WfSpanAllocator::<C>::new(N)));
     // SAFETY: init once, before sharing; both are leaked and never move.
     unsafe { alloc.init(region.ptr(), region.len()) };
     (alloc, region)
@@ -222,9 +220,7 @@ fn step_counts_bounded_under_contention() {
                     }
                     let mut step = StepCounter::new();
                     // SAFETY: freed once.
-                    unsafe {
-                        alloc.dealloc_with_token_counted(p, layout, token, &mut step)
-                    };
+                    unsafe { alloc.dealloc_with_token_counted(p, layout, token, &mut step) };
                     step.assert_large_bounds(N, HELP_BUDGET_H, N, MAX_LARGE_RUN_CLASSES);
                 }
             })

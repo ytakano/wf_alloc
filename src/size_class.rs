@@ -88,6 +88,9 @@ mod tests {
         // SPAN_SIZE or larger is unsupported
         assert_eq!(size_to_class(SPAN_SIZE, 1), None);
         assert_eq!(size_to_class(MAX_BLOCK_SIZE + 1, 1), None);
-        assert_eq!(size_to_class(MAX_BLOCK_SIZE, 1), Some(MAX_SUPPORTED_CLASSES - 1));
+        assert_eq!(
+            size_to_class(MAX_BLOCK_SIZE, 1),
+            Some(MAX_SUPPORTED_CLASSES - 1)
+        );
     }
 }
