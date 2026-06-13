@@ -112,28 +112,26 @@ CPU ids get no initialized local heap.
 
 ## `GlobalAlloc` wrapper (feature `global`)
 
+For hosted/std targets, `global::HostedLazyGlobalWfSpanAllocator` can be
+installed as a real Rust global allocator:
+
 ```rust
-use wf_alloc::global::GlobalWfSpanAllocator;
+use wf_alloc::global::HostedLazyGlobalWfSpanAllocator;
 
-// 128 SPAN_SIZE-aligned spans as backing memory.
-#[repr(align(65536))]
-struct AlignedRegion([u8; 128 * 65536]);
-static mut REGION: AlignedRegion = AlignedRegion([0u8; 128 * 65536]);
-
-fn setup(
-    active_threads: usize,
-) -> &'static GlobalWfSpanAllocator<{ wf_alloc::MAX_SUPPORTED_CLASSES }> {
-    let alloc = Box::leak(Box::new(GlobalWfSpanAllocator::new(active_threads)));
-    unsafe { alloc.init((&raw mut REGION.0).cast::<u8>(), 128 * 65536) };
-    alloc
-}
+#[global_allocator]
+static ALLOC: HostedLazyGlobalWfSpanAllocator =
+    HostedLazyGlobalWfSpanAllocator::new(16, 1024);
 ```
 
-Threads register automatically on first use. Threads beyond `active_threads` cannot register: their allocations return
-null and their frees leak (never UB). Because the wrapper now sizes metadata
-at runtime, it is no longer `const`-constructible as a plain
-`#[global_allocator] static`; a static global allocator would need
-caller-provided static metadata storage.
+The arguments are `active_threads` and `region_spans`. The wrapper is
+`const`-constructible; on first allocation it calls `std::alloc::System`
+directly to allocate wf_alloc's metadata and backing span region, initializes
+`WfSpanAllocator` with `from_metadata_region`, and then routes allocations
+through wf_alloc. It is therefore hosted/std-only, not the bare-metal path.
+
+Threads beyond `active_threads` cannot register: their allocations return
+null and their frees leak (never UB). For bare-metal code, use the token API
+with `WfSpanAllocator::from_metadata_region` as shown above.
 
 ## Examples
 
@@ -144,6 +142,9 @@ caller-provided static metadata storage.
 - [`examples/baremetal.rs`](examples/baremetal.rs) — no_std/bare-metal
   pattern: static aligned region, runtime CPU count, and no metadata for
   inactive CPU ids. `cargo run --example baremetal`
+- [`examples/global_wrapper.rs`](examples/global_wrapper.rs) — hosted
+  `#[global_allocator]` use of `global::HostedLazyGlobalWfSpanAllocator`.
+  `cargo run --features global --example global_wrapper`
 
 ## Feature flags
 
