@@ -100,6 +100,3 @@ risks.
   lemma is best-effort. See docs/wfspan-model.md.
 - The quiescent verifier requires external quiescence; calling it
   concurrently is a (test-harness-only) race.
-- `GlobalAlloc` wrapper: threads beyond active_threads cannot register; their frees
-  leak (never UB) and their allocs return null. Documented in
-  `global.rs`.

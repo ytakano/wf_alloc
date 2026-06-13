@@ -1,7 +1,7 @@
 //! Explicit thread tokens and bounded thread registration.
 //!
 //! The core API is token-based (no TLS) so it works in no_std / RTOS-style
-//! environments; a TLS wrapper exists only behind the `global` feature.
+//! environments.
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 

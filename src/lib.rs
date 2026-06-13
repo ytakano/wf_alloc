@@ -6,8 +6,7 @@
 //! argument, and `docs/invariants.md` for the invariants the code keeps.
 //!
 //! The core is no_std-friendly (build with `--no-default-features`); the
-//! `std` feature only adds test/bench harness helpers, and `global` adds an
-//! optional `GlobalAlloc` wrapper.
+//! `std` feature only adds test/bench harness helpers.
 //!
 //! # Quick start
 //!
@@ -62,8 +61,6 @@ pub mod stats;
 pub mod tagged;
 pub mod thread;
 
-#[cfg(feature = "global")]
-pub mod global;
 #[cfg(feature = "std")]
 pub mod region;
 #[cfg(feature = "std")]

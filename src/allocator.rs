@@ -569,7 +569,7 @@ impl<const C: usize, const HUGE_GRANULE_SPANS: usize> WfSpanAllocator<C, HUGE_GR
         // Dispatch by Layout, with the same predicates as in alloc. This
         // guarantees span_from_ptr (SPAN_SIZE masking) is never applied to a
         // large or huge payload, whose masked address could be a headerless
-        // interior span. Relies on the GlobalAlloc-style contract that
+        // interior span. Relies on the allocation API contract that
         // dealloc receives the same Layout the pointer was allocated with.
         if Self::small_class(layout).is_none() {
             if layout.size() >= Self::HUGE_THRESHOLD {

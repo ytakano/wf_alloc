@@ -105,7 +105,7 @@ local ones online.
   `size >= HUGE_THRESHOLD` (= one huge granule) → huge; otherwise large.
   Hence `span_from_ptr` (SPAN_SIZE masking) is never applied to a large
   or huge payload, whose masked address could be a headerless interior
-  span. This relies on the GlobalAlloc-style contract that dealloc
+  span. This relies on the allocation API contract that dealloc
   receives the Layout the pointer was allocated with.
 - A small-size, giant-alignment request dispatches large (size-based huge
   rule, guide B.4); its alignment slack is honored by the large classes.
