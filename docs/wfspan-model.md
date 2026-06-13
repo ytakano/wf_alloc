@@ -105,4 +105,4 @@ See docs/memory-footprint.md; the paper's bound
 `realloc`, full malloc ABI, OS mmap/sbrk backend, huge (> 16 KiB)
 allocations, NUMA, cross-process use, returning raw spans to the pool,
 re-typing a span to a different size class, hard real-time certification,
-and loom model checking (feature flag reserved; see docs/progress.md).
+and full allocator-level loom model checking; small-state loom models for core subprotocols are available via `cargo test --features loom --test loom_models`.

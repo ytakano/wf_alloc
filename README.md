@@ -161,12 +161,14 @@ threads.
 | `std` | yes | test/bench harness helpers (`region`, `verify`) |
 | `global` | no | hosted `GlobalAlloc` wrapper (requires std TLS) |
 | `experimental-global` | no | compatibility alias for `global` |
-| `stats`, `loom`, `nightly` | no | reserved (stats are currently always on; loom is not wired up) |
+| `stats`, `nightly` | no | reserved (`stats` are currently always on) |
+| `loom` | no | small-state loom model tests for core concurrent subprotocols |
 
 ## Testing and verification
 
 ```sh
 cargo test                       # unit + integration + doc tests
+cargo test --features loom --test loom_models -- --nocapture
 cargo clippy --all-targets
 cargo bench                      # alloc_free, remote_free, wcet_like
 
@@ -210,8 +212,8 @@ This is a research prototype, not a production allocator:
   allocations served by `System` are not wait-free wfspan operations.
 - No `realloc`, no NUMA awareness, no cross-process use.
 - Concurrency confidence comes from smoke tests, step-bound assertions,
-  Miri (sequential paths), and the invariant checker — loom model checking
-  is future work.
+  Miri (sequential paths), the invariant checker, and small-state loom
+  models for the core concurrent subprotocols.
 
 ## License
 

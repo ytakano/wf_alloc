@@ -120,10 +120,16 @@ compile error.
 
 ## Loom status
 
-The `loom` feature flag is reserved but model tests are NOT wired up yet:
-the core uses raw pointers to atomics inside spans (memory not owned by
-loom types), which requires a shim layer mapping span headers onto
-`loom::sync::atomic` cells. This is documented future work; concurrency
-confidence currently comes from the concurrent smoke tests, the
-StepCounter bounds, Miri on the sequential paths, and the quiescent
-invariant checker.
+The `loom` feature flag wires up small-state model tests for the
+allocator's core concurrent subprotocols: SPMC one-shot pop, help-record
+completion/reclaim ownership, and remote MPSC stalled-link handling. These
+models use compact integer node/span ids and `loom::sync::atomic` cells so
+CI can explore a reasonable bounded state space without modeling the full
+raw backing arena.
+
+The production core itself still uses raw pointers to atomics inside spans
+(memory not owned by loom types). Full allocator-level loom exploration
+would require a shim layer mapping span headers and arena ownership onto
+loom-managed cells; that remains future work. Broader concurrency
+confidence still comes from the concurrent smoke tests, the StepCounter
+bounds, Miri on the sequential paths, and the quiescent invariant checker.

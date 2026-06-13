@@ -19,11 +19,12 @@ global = ["std"]
 experimental-global = ["global"]
 # Extra runtime statistics (currently stats are always on; reserved).
 stats = []
-# Reserved for loom model testing (not wired up yet; see docs/progress.md).
-loom = []
+# Small-state loom model tests for concurrent allocator subprotocols.
+loom = ["std", "dep:loom"]
 nightly = []
 
 [dependencies]
+loom = { version = "0.7", optional = true }
 
 [[bench]]
 name = "alloc_free"
