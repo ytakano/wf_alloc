@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>memalloc_bench report</title>
+<style>
+  :root { color-scheme: light; --border: #d7dde5; --text: #18212f; --muted: #5d6878; --bg: #f7f8fb; --panel: #ffffff; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); }
+  header { padding: 28px 32px 18px; background: #ffffff; border-bottom: 1px solid var(--border); }
+  main { padding: 24px 32px 40px; max-width: 1280px; margin: 0 auto; }
+  h1 { margin: 0 0 8px; font-size: 28px; }
+  h2 { margin: 0 0 12px; font-size: 17px; }
+  .muted { color: var(--muted); }
+  .grid-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 18px; }
+  .chart-card, .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; }
+  .chart-bg { fill: #fff; }
+  .grid { stroke: #e7ebf0; stroke-width: 1; }
+  .axis { stroke: #7a8493; stroke-width: 1.2; }
+  .axis-label, .legend { fill: #5d6878; font-size: 11px; }
+  .chart-title { fill: #18212f; font-size: 13px; font-weight: 650; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { padding: 7px 9px; border-bottom: 1px solid #e7ebf0; text-align: right; white-space: nowrap; }
+  th { color: #3c4655; font-weight: 650; background: #f0f3f7; position: sticky; top: 0; }
+  td:first-child, th:first-child, td:nth-child(2), th:nth-child(2) { text-align: left; }
+  .failed { color: #b91c1c; font-weight: 700; }
+  details { background: #fff; border: 1px solid var(--border); border-radius: 8px; margin: 10px 0; padding: 10px 12px; }
+  summary { cursor: pointer; font-weight: 650; }
+  pre { overflow-x: auto; white-space: pre-wrap; color: #263142; }
+</style>
+</head>
+<body>
+<header>
+  <h1>memalloc_bench report</h1>
+  <div class="muted">Generated at 2026-06-13T14:03:00</div>
+</header>
+<main>
+  <section class="panel">
+    <h2>Configuration</h2>
+    <table><tbody><tr><th>allocators</th><td>wf_alloc, rlsf, rlsf-posix, mimalloc</td></tr><tr><th>threads</th><td>1, 2, 4, 8</td></tr><tr><th>total_live_slots</th><td>4,096</td></tr><tr><th>duration_ms</th><td>5,000</td></tr><tr><th>pool_mib</th><td>1,024</td></tr><tr><th>max_size</th><td>16,384</td></tr><tr><th>remote_free_percent</th><td>20</td></tr><tr><th>core_stride</th><td>2</td></tr><tr><th>extra_args</th><td></td></tr></tbody></table>
+  </section>
+  <h2 style="margin: 24px 0 12px;">Charts</h2>
+  <div class="grid-layout">
+<section class="chart-card">
+  <h2>Throughput ops/s</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Throughput ops/s chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">throughput_ops_per_sec</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">10,658,513</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">21,317,026</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">31,975,538</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">42,634,051</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,151.2 292.0,152.5 514.0,74.2 736.0,36.0" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="151.2" r="3.5" fill="#2563eb"><title>wf_alloc: 22,176,066.00</title></circle><circle cx="292.0" cy="152.5" r="3.5" fill="#2563eb"><title>wf_alloc: 21,943,104.00</title></circle><circle cx="514.0" cy="74.2" r="3.5" fill="#2563eb"><title>wf_alloc: 35,856,112.00</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#2563eb"><title>wf_alloc: 42,634,051.00</title></circle><polyline points="70.0,172.7 292.0,235.4 514.0,248.9 736.0,260.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="172.7" r="3.5" fill="#dc2626"><title>rlsf: 18,357,294.00</title></circle><circle cx="292.0" cy="235.4" r="3.5" fill="#dc2626"><title>rlsf: 7,217,385.00</title></circle><circle cx="514.0" cy="248.9" r="3.5" fill="#dc2626"><title>rlsf: 4,819,310.00</title></circle><circle cx="736.0" cy="260.0" r="3.5" fill="#dc2626"><title>rlsf: 2,847,153.00</title></circle><polyline points="70.0,177.9 292.0,251.3 514.0,250.1 736.0,256.4" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="177.9" r="3.5" fill="#059669"><title>rlsf-posix: 17,428,662.00</title></circle><circle cx="292.0" cy="251.3" r="3.5" fill="#059669"><title>rlsf-posix: 4,393,099.00</title></circle><circle cx="514.0" cy="250.1" r="3.5" fill="#059669"><title>rlsf-posix: 4,594,485.00</title></circle><circle cx="736.0" cy="256.4" r="3.5" fill="#059669"><title>rlsf-posix: 3,475,061.00</title></circle><polyline points="70.0,134.6 292.0,142.7 514.0,82.0 736.0,42.6" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="134.6" r="3.5" fill="#7c3aed"><title>mimalloc: 25,112,973.00</title></circle><circle cx="292.0" cy="142.7" r="3.5" fill="#7c3aed"><title>mimalloc: 23,671,189.00</title></circle><circle cx="514.0" cy="82.0" r="3.5" fill="#7c3aed"><title>mimalloc: 34,453,994.00</title></circle><circle cx="736.0" cy="42.6" r="3.5" fill="#7c3aed"><title>mimalloc: 41,454,140.00</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Allocations/s</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Allocations/s chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">throughput_allocs_per_sec</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">5,329,256</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">10,658,512</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">15,987,769</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">21,317,025</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,151.2 292.0,152.5 514.0,74.2 736.0,36.0" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="151.2" r="3.5" fill="#2563eb"><title>wf_alloc: 11,088,033.00</title></circle><circle cx="292.0" cy="152.5" r="3.5" fill="#2563eb"><title>wf_alloc: 10,971,552.00</title></circle><circle cx="514.0" cy="74.2" r="3.5" fill="#2563eb"><title>wf_alloc: 17,928,056.00</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#2563eb"><title>wf_alloc: 21,317,025.00</title></circle><polyline points="70.0,172.7 292.0,235.4 514.0,248.9 736.0,260.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="172.7" r="3.5" fill="#dc2626"><title>rlsf: 9,178,647.00</title></circle><circle cx="292.0" cy="235.4" r="3.5" fill="#dc2626"><title>rlsf: 3,608,692.00</title></circle><circle cx="514.0" cy="248.9" r="3.5" fill="#dc2626"><title>rlsf: 2,409,655.00</title></circle><circle cx="736.0" cy="260.0" r="3.5" fill="#dc2626"><title>rlsf: 1,423,577.00</title></circle><polyline points="70.0,177.9 292.0,251.3 514.0,250.1 736.0,256.4" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="177.9" r="3.5" fill="#059669"><title>rlsf-posix: 8,714,331.00</title></circle><circle cx="292.0" cy="251.3" r="3.5" fill="#059669"><title>rlsf-posix: 2,196,549.00</title></circle><circle cx="514.0" cy="250.1" r="3.5" fill="#059669"><title>rlsf-posix: 2,297,242.00</title></circle><circle cx="736.0" cy="256.4" r="3.5" fill="#059669"><title>rlsf-posix: 1,737,531.00</title></circle><polyline points="70.0,134.6 292.0,142.7 514.0,82.0 736.0,42.6" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="134.6" r="3.5" fill="#7c3aed"><title>mimalloc: 12,556,487.00</title></circle><circle cx="292.0" cy="142.7" r="3.5" fill="#7c3aed"><title>mimalloc: 11,835,594.00</title></circle><circle cx="514.0" cy="82.0" r="3.5" fill="#7c3aed"><title>mimalloc: 17,226,997.00</title></circle><circle cx="736.0" cy="42.6" r="3.5" fill="#7c3aed"><title>mimalloc: 20,727,070.00</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Alloc latency average ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Alloc latency average ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">alloc_latency_average_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">575</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">1,150</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">1,726</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">2,301</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,271.1 292.0,270.2 514.0,270.9 736.0,270.8" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="271.1" r="3.5" fill="#2563eb"><title>wf_alloc: 47.000</title></circle><circle cx="292.0" cy="270.2" r="3.5" fill="#2563eb"><title>wf_alloc: 56.000</title></circle><circle cx="514.0" cy="270.9" r="3.5" fill="#2563eb"><title>wf_alloc: 49.000</title></circle><circle cx="736.0" cy="270.8" r="3.5" fill="#2563eb"><title>wf_alloc: 50.000</title></circle><polyline points="70.0,271.1 292.0,256.3 514.0,202.6 736.0,52.6" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="271.1" r="3.5" fill="#dc2626"><title>rlsf: 47.000</title></circle><circle cx="292.0" cy="256.3" r="3.5" fill="#dc2626"><title>rlsf: 189.000</title></circle><circle cx="514.0" cy="202.6" r="3.5" fill="#dc2626"><title>rlsf: 704.000</title></circle><circle cx="736.0" cy="52.6" r="3.5" fill="#dc2626"><title>rlsf: 2,142.00</title></circle><polyline points="70.0,269.8 292.0,234.1 514.0,177.4 736.0,36.0" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="269.8" r="3.5" fill="#059669"><title>rlsf-posix: 59.000</title></circle><circle cx="292.0" cy="234.1" r="3.5" fill="#059669"><title>rlsf-posix: 402.000</title></circle><circle cx="514.0" cy="177.4" r="3.5" fill="#059669"><title>rlsf-posix: 945.000</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#059669"><title>rlsf-posix: 2,301.00</title></circle><polyline points="70.0,271.3 292.0,270.4 514.0,270.4 736.0,270.3" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="271.3" r="3.5" fill="#7c3aed"><title>mimalloc: 45.000</title></circle><circle cx="292.0" cy="270.4" r="3.5" fill="#7c3aed"><title>mimalloc: 54.000</title></circle><circle cx="514.0" cy="270.4" r="3.5" fill="#7c3aed"><title>mimalloc: 54.000</title></circle><circle cx="736.0" cy="270.3" r="3.5" fill="#7c3aed"><title>mimalloc: 55.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Alloc latency p50 ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Alloc latency p50 ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">alloc_latency_p50_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">331</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">662</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">992</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">1,323</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,268.7 292.0,268.7 514.0,268.7 736.0,268.7" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="268.7" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><circle cx="292.0" cy="268.7" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><circle cx="514.0" cy="268.7" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><circle cx="736.0" cy="268.7" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><polyline points="70.0,268.6 292.0,241.5 514.0,183.3 736.0,56.1" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="268.6" r="3.5" fill="#dc2626"><title>rlsf: 41.000</title></circle><circle cx="292.0" cy="241.5" r="3.5" fill="#dc2626"><title>rlsf: 190.000</title></circle><circle cx="514.0" cy="183.3" r="3.5" fill="#dc2626"><title>rlsf: 511.000</title></circle><circle cx="736.0" cy="56.1" r="3.5" fill="#dc2626"><title>rlsf: 1,212.00</title></circle><polyline points="70.0,266.9 292.0,241.4 514.0,177.9 736.0,36.0" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="266.9" r="3.5" fill="#059669"><title>rlsf-posix: 50.000</title></circle><circle cx="292.0" cy="241.4" r="3.5" fill="#059669"><title>rlsf-posix: 191.000</title></circle><circle cx="514.0" cy="177.9" r="3.5" fill="#059669"><title>rlsf-posix: 541.000</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#059669"><title>rlsf-posix: 1,323.00</title></circle><polyline points="70.0,268.7 292.0,268.7 514.0,268.7 736.0,268.7" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="268.7" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle><circle cx="292.0" cy="268.7" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle><circle cx="514.0" cy="268.7" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle><circle cx="736.0" cy="268.7" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Alloc latency p90 ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Alloc latency p90 ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">alloc_latency_p90_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">1,540</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">3,081</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">4,622</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">6,162</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,273.7 292.0,272.9 514.0,273.7 736.0,273.3" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="273.7" r="3.5" fill="#2563eb"><title>wf_alloc: 60.000</title></circle><circle cx="292.0" cy="272.9" r="3.5" fill="#2563eb"><title>wf_alloc: 80.000</title></circle><circle cx="514.0" cy="273.7" r="3.5" fill="#2563eb"><title>wf_alloc: 60.000</title></circle><circle cx="736.0" cy="273.3" r="3.5" fill="#2563eb"><title>wf_alloc: 70.000</title></circle><polyline points="70.0,273.7 292.0,265.1 514.0,222.1 736.0,94.1" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="273.7" r="3.5" fill="#dc2626"><title>rlsf: 60.000</title></circle><circle cx="292.0" cy="265.1" r="3.5" fill="#dc2626"><title>rlsf: 280.000</title></circle><circle cx="514.0" cy="222.1" r="3.5" fill="#dc2626"><title>rlsf: 1,383.00</title></circle><circle cx="736.0" cy="94.1" r="3.5" fill="#dc2626"><title>rlsf: 4,669.00</title></circle><polyline points="70.0,272.9 292.0,243.2 514.0,186.7 736.0,36.0" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="272.9" r="3.5" fill="#059669"><title>rlsf-posix: 80.000</title></circle><circle cx="292.0" cy="243.2" r="3.5" fill="#059669"><title>rlsf-posix: 842.000</title></circle><circle cx="514.0" cy="186.7" r="3.5" fill="#059669"><title>rlsf-posix: 2,294.00</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#059669"><title>rlsf-posix: 6,162.00</title></circle><polyline points="70.0,273.6 292.0,272.9 514.0,272.9 736.0,272.9" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="273.6" r="3.5" fill="#7c3aed"><title>mimalloc: 61.000</title></circle><circle cx="292.0" cy="272.9" r="3.5" fill="#7c3aed"><title>mimalloc: 80.000</title></circle><circle cx="514.0" cy="272.9" r="3.5" fill="#7c3aed"><title>mimalloc: 80.000</title></circle><circle cx="736.0" cy="272.9" r="3.5" fill="#7c3aed"><title>mimalloc: 80.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Alloc latency p99 ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Alloc latency p99 ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">alloc_latency_p99_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">3,765</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">7,530</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">11,294</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">15,059</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,274.4 292.0,272.8 514.0,273.8 736.0,273.8" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="274.4" r="3.5" fill="#2563eb"><title>wf_alloc: 100.000</title></circle><circle cx="292.0" cy="272.8" r="3.5" fill="#2563eb"><title>wf_alloc: 201.000</title></circle><circle cx="514.0" cy="273.8" r="3.5" fill="#2563eb"><title>wf_alloc: 140.000</title></circle><circle cx="736.0" cy="273.8" r="3.5" fill="#2563eb"><title>wf_alloc: 140.000</title></circle><polyline points="70.0,274.7 292.0,270.4 514.0,227.0 736.0,36.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="274.7" r="3.5" fill="#dc2626"><title>rlsf: 80.000</title></circle><circle cx="292.0" cy="270.4" r="3.5" fill="#dc2626"><title>rlsf: 351.000</title></circle><circle cx="514.0" cy="227.0" r="3.5" fill="#dc2626"><title>rlsf: 3,076.00</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#dc2626"><title>rlsf: 15,059.00</title></circle><polyline points="70.0,273.5 292.0,254.6 514.0,163.4 736.0,67.9" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="273.5" r="3.5" fill="#059669"><title>rlsf-posix: 160.000</title></circle><circle cx="292.0" cy="254.6" r="3.5" fill="#059669"><title>rlsf-posix: 1,343.00</title></circle><circle cx="514.0" cy="163.4" r="3.5" fill="#059669"><title>rlsf-posix: 7,063.00</title></circle><circle cx="736.0" cy="67.9" r="3.5" fill="#059669"><title>rlsf-posix: 13,055.00</title></circle><polyline points="70.0,274.2 292.0,273.1 514.0,273.0 736.0,272.8" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="274.2" r="3.5" fill="#7c3aed"><title>mimalloc: 111.000</title></circle><circle cx="292.0" cy="273.1" r="3.5" fill="#7c3aed"><title>mimalloc: 180.000</title></circle><circle cx="514.0" cy="273.0" r="3.5" fill="#7c3aed"><title>mimalloc: 190.000</title></circle><circle cx="736.0" cy="272.8" r="3.5" fill="#7c3aed"><title>mimalloc: 200.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Alloc latency worst ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Alloc latency worst ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">alloc_latency_worst_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">278,890</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">557,779</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">836,668</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">1,115,558</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,271.8 292.0,264.9 514.0,262.8 736.0,262.8" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="271.8" r="3.5" fill="#2563eb"><title>wf_alloc: 19,347.00</title></circle><circle cx="292.0" cy="264.9" r="3.5" fill="#2563eb"><title>wf_alloc: 51,608.00</title></circle><circle cx="514.0" cy="262.8" r="3.5" fill="#2563eb"><title>wf_alloc: 61,196.00</title></circle><circle cx="736.0" cy="262.8" r="3.5" fill="#2563eb"><title>wf_alloc: 61,586.00</title></circle><polyline points="70.0,271.9 292.0,271.9 514.0,261.3 736.0,246.1" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="271.9" r="3.5" fill="#dc2626"><title>rlsf: 19,026.00</title></circle><circle cx="292.0" cy="271.9" r="3.5" fill="#dc2626"><title>rlsf: 19,206.00</title></circle><circle cx="514.0" cy="261.3" r="3.5" fill="#dc2626"><title>rlsf: 68,440.00</title></circle><circle cx="736.0" cy="246.1" r="3.5" fill="#dc2626"><title>rlsf: 138,952.00</title></circle><polyline points="70.0,271.6 292.0,251.8 514.0,263.2 736.0,245.4" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="271.6" r="3.5" fill="#059669"><title>rlsf-posix: 20,308.00</title></circle><circle cx="292.0" cy="251.8" r="3.5" fill="#059669"><title>rlsf-posix: 112,312.00</title></circle><circle cx="514.0" cy="263.2" r="3.5" fill="#059669"><title>rlsf-posix: 59,592.00</title></circle><circle cx="736.0" cy="245.4" r="3.5" fill="#059669"><title>rlsf-posix: 142,189.00</title></circle><polyline points="70.0,207.9 292.0,270.0 514.0,183.5 736.0,36.0" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="207.9" r="3.5" fill="#7c3aed"><title>mimalloc: 316,618.00</title></circle><circle cx="292.0" cy="270.0" r="3.5" fill="#7c3aed"><title>mimalloc: 28,113.00</title></circle><circle cx="514.0" cy="183.5" r="3.5" fill="#7c3aed"><title>mimalloc: 429,782.00</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#7c3aed"><title>mimalloc: 1,115,558.00</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Free latency average ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Free latency average ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">free_latency_average_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">778</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">1,556</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">2,335</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">3,113</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,272.8 292.0,271.9 514.0,272.2 736.0,272.1" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="272.8" r="3.5" fill="#2563eb"><title>wf_alloc: 41.000</title></circle><circle cx="292.0" cy="271.9" r="3.5" fill="#2563eb"><title>wf_alloc: 53.000</title></circle><circle cx="514.0" cy="272.2" r="3.5" fill="#2563eb"><title>wf_alloc: 49.000</title></circle><circle cx="736.0" cy="272.1" r="3.5" fill="#2563eb"><title>wf_alloc: 51.000</title></circle><polyline points="70.0,272.0 292.0,261.9 514.0,221.8 736.0,36.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="272.0" r="3.5" fill="#dc2626"><title>rlsf: 52.000</title></circle><circle cx="292.0" cy="261.9" r="3.5" fill="#dc2626"><title>rlsf: 183.000</title></circle><circle cx="514.0" cy="221.8" r="3.5" fill="#dc2626"><title>rlsf: 703.000</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#dc2626"><title>rlsf: 3,113.00</title></circle><polyline points="70.0,271.3 292.0,244.9 514.0,207.2 736.0,107.4" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="271.3" r="3.5" fill="#059669"><title>rlsf-posix: 61.000</title></circle><circle cx="292.0" cy="244.9" r="3.5" fill="#059669"><title>rlsf-posix: 403.000</title></circle><circle cx="514.0" cy="207.2" r="3.5" fill="#059669"><title>rlsf-posix: 893.000</title></circle><circle cx="736.0" cy="107.4" r="3.5" fill="#059669"><title>rlsf-posix: 2,187.00</title></circle><polyline points="70.0,273.1 292.0,272.1 514.0,272.1 736.0,272.1" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="273.1" r="3.5" fill="#7c3aed"><title>mimalloc: 37.000</title></circle><circle cx="292.0" cy="272.1" r="3.5" fill="#7c3aed"><title>mimalloc: 50.000</title></circle><circle cx="514.0" cy="272.1" r="3.5" fill="#7c3aed"><title>mimalloc: 50.000</title></circle><circle cx="736.0" cy="272.1" r="3.5" fill="#7c3aed"><title>mimalloc: 51.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Free latency p50 ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Free latency p50 ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">free_latency_p50_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">336</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">671</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">1,006</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">1,342</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,268.8 292.0,268.8 514.0,268.8 736.0,268.8" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="268.8" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><circle cx="292.0" cy="268.8" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><circle cx="514.0" cy="268.8" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><circle cx="736.0" cy="268.8" r="3.5" fill="#2563eb"><title>wf_alloc: 40.000</title></circle><polyline points="70.0,267.1 292.0,243.8 514.0,184.6 736.0,36.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="267.1" r="3.5" fill="#dc2626"><title>rlsf: 50.000</title></circle><circle cx="292.0" cy="243.8" r="3.5" fill="#dc2626"><title>rlsf: 180.000</title></circle><circle cx="514.0" cy="184.6" r="3.5" fill="#dc2626"><title>rlsf: 511.000</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#dc2626"><title>rlsf: 1,342.00</title></circle><polyline points="70.0,265.3 292.0,243.6 514.0,191.8 736.0,62.6" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="265.3" r="3.5" fill="#059669"><title>rlsf-posix: 60.000</title></circle><circle cx="292.0" cy="243.6" r="3.5" fill="#059669"><title>rlsf-posix: 181.000</title></circle><circle cx="514.0" cy="191.8" r="3.5" fill="#059669"><title>rlsf-posix: 471.000</title></circle><circle cx="736.0" cy="62.6" r="3.5" fill="#059669"><title>rlsf-posix: 1,193.00</title></circle><polyline points="70.0,268.8 292.0,268.8 514.0,268.8 736.0,268.8" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="268.8" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle><circle cx="292.0" cy="268.8" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle><circle cx="514.0" cy="268.8" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle><circle cx="736.0" cy="268.8" r="3.5" fill="#7c3aed"><title>mimalloc: 40.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Free latency p90 ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Free latency p90 ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">free_latency_p90_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">1,646</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">3,292</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">4,937</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">6,583</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,274.2 292.0,273.1 514.0,273.4 736.0,273.1" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="274.2" r="3.5" fill="#2563eb"><title>wf_alloc: 50.000</title></circle><circle cx="292.0" cy="273.1" r="3.5" fill="#2563eb"><title>wf_alloc: 80.000</title></circle><circle cx="514.0" cy="273.4" r="3.5" fill="#2563eb"><title>wf_alloc: 70.000</title></circle><circle cx="736.0" cy="273.1" r="3.5" fill="#2563eb"><title>wf_alloc: 80.000</title></circle><polyline points="70.0,273.4 292.0,266.5 514.0,225.2 736.0,36.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="273.4" r="3.5" fill="#dc2626"><title>rlsf: 70.000</title></circle><circle cx="292.0" cy="266.5" r="3.5" fill="#dc2626"><title>rlsf: 261.000</title></circle><circle cx="514.0" cy="225.2" r="3.5" fill="#dc2626"><title>rlsf: 1,393.00</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#dc2626"><title>rlsf: 6,583.00</title></circle><polyline points="70.0,273.1 292.0,246.1 514.0,196.3 736.0,55.4" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="273.1" r="3.5" fill="#059669"><title>rlsf-posix: 80.000</title></circle><circle cx="292.0" cy="246.1" r="3.5" fill="#059669"><title>rlsf-posix: 821.000</title></circle><circle cx="514.0" cy="196.3" r="3.5" fill="#059669"><title>rlsf-posix: 2,185.00</title></circle><circle cx="736.0" cy="55.4" r="3.5" fill="#059669"><title>rlsf-posix: 6,051.00</title></circle><polyline points="70.0,274.5 292.0,273.1 514.0,273.1 736.0,273.0" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="274.5" r="3.5" fill="#7c3aed"><title>mimalloc: 41.000</title></circle><circle cx="292.0" cy="273.1" r="3.5" fill="#7c3aed"><title>mimalloc: 80.000</title></circle><circle cx="514.0" cy="273.1" r="3.5" fill="#7c3aed"><title>mimalloc: 80.000</title></circle><circle cx="736.0" cy="273.0" r="3.5" fill="#7c3aed"><title>mimalloc: 81.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Free latency p99 ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Free latency p99 ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">free_latency_p99_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">7,805</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">15,610</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">23,414</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">31,219</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,275.5 292.0,275.1 514.0,275.2 736.0,275.0" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="275.5" r="3.5" fill="#2563eb"><title>wf_alloc: 61.000</title></circle><circle cx="292.0" cy="275.1" r="3.5" fill="#2563eb"><title>wf_alloc: 120.000</title></circle><circle cx="514.0" cy="275.2" r="3.5" fill="#2563eb"><title>wf_alloc: 110.000</title></circle><circle cx="736.0" cy="275.0" r="3.5" fill="#2563eb"><title>wf_alloc: 130.000</title></circle><polyline points="70.0,275.3 292.0,273.5 514.0,253.3 736.0,36.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="275.3" r="3.5" fill="#dc2626"><title>rlsf: 91.000</title></circle><circle cx="292.0" cy="273.5" r="3.5" fill="#dc2626"><title>rlsf: 331.000</title></circle><circle cx="514.0" cy="253.3" r="3.5" fill="#dc2626"><title>rlsf: 2,956.00</title></circle><circle cx="736.0" cy="36.0" r="3.5" fill="#dc2626"><title>rlsf: 31,219.00</title></circle><polyline points="70.0,275.2 292.0,266.0 514.0,222.4 736.0,176.5" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="275.2" r="3.5" fill="#059669"><title>rlsf-posix: 110.000</title></circle><circle cx="292.0" cy="266.0" r="3.5" fill="#059669"><title>rlsf-posix: 1,302.00</title></circle><circle cx="514.0" cy="222.4" r="3.5" fill="#059669"><title>rlsf-posix: 6,973.00</title></circle><circle cx="736.0" cy="176.5" r="3.5" fill="#059669"><title>rlsf-posix: 12,944.00</title></circle><polyline points="70.0,275.6 292.0,275.1 514.0,275.1 736.0,275.1" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="275.6" r="3.5" fill="#7c3aed"><title>mimalloc: 51.000</title></circle><circle cx="292.0" cy="275.1" r="3.5" fill="#7c3aed"><title>mimalloc: 111.000</title></circle><circle cx="514.0" cy="275.1" r="3.5" fill="#7c3aed"><title>mimalloc: 111.000</title></circle><circle cx="736.0" cy="275.1" r="3.5" fill="#7c3aed"><title>mimalloc: 120.000</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+
+
+<section class="chart-card">
+  <h2>Free latency worst ns</h2>
+  <svg viewBox="0 0 760 348" role="img" aria-label="Free latency worst ns chart">
+    <rect x="0" y="0" width="760" height="348" class="chart-bg" />
+    <text x="70" y="24" class="chart-title">free_latency_worst_ns</text>
+    <line x1="70" y1="276.0" x2="736" y2="276.0" class="grid" /><text x="62" y="280.0" class="axis-label" text-anchor="end">0</text><line x1="70" y1="216.0" x2="736" y2="216.0" class="grid" /><text x="62" y="220.0" class="axis-label" text-anchor="end">74,929</text><line x1="70" y1="156.0" x2="736" y2="156.0" class="grid" /><text x="62" y="160.0" class="axis-label" text-anchor="end">149,858</text><line x1="70" y1="96.0" x2="736" y2="96.0" class="grid" /><text x="62" y="100.0" class="axis-label" text-anchor="end">224,787</text><line x1="70" y1="36.0" x2="736" y2="36.0" class="grid" /><text x="62" y="40.0" class="axis-label" text-anchor="end">299,716</text><text x="70.0" y="310" class="axis-label" text-anchor="middle">1</text><text x="292.0" y="310" class="axis-label" text-anchor="middle">2</text><text x="514.0" y="310" class="axis-label" text-anchor="middle">4</text><text x="736.0" y="310" class="axis-label" text-anchor="middle">8</text>
+    <line x1="70" y1="36" x2="70" y2="276" class="axis" />
+    <line x1="70" y1="276" x2="736" y2="276" class="axis" />
+    <text x="403.0" y="328" class="axis-label" text-anchor="middle">threads</text>
+    <polyline points="70.0,241.3 292.0,259.8 514.0,262.2 736.0,258.8" fill="none" stroke="#2563eb" stroke-width="2.5" /><circle cx="70.0" cy="241.3" r="3.5" fill="#2563eb"><title>wf_alloc: 43,372.00</title></circle><circle cx="292.0" cy="259.8" r="3.5" fill="#2563eb"><title>wf_alloc: 20,208.00</title></circle><circle cx="514.0" cy="262.2" r="3.5" fill="#2563eb"><title>wf_alloc: 17,182.00</title></circle><circle cx="736.0" cy="258.8" r="3.5" fill="#2563eb"><title>wf_alloc: 21,481.00</title></circle><polyline points="70.0,260.5 292.0,260.1 514.0,245.1 736.0,108.0" fill="none" stroke="#dc2626" stroke-width="2.5" /><circle cx="70.0" cy="260.5" r="3.5" fill="#dc2626"><title>rlsf: 19,366.00</title></circle><circle cx="292.0" cy="260.1" r="3.5" fill="#dc2626"><title>rlsf: 19,888.00</title></circle><circle cx="514.0" cy="245.1" r="3.5" fill="#dc2626"><title>rlsf: 38,563.00</title></circle><circle cx="736.0" cy="108.0" r="3.5" fill="#dc2626"><title>rlsf: 209,817.00</title></circle><polyline points="70.0,259.7 292.0,175.4 514.0,229.4 736.0,95.9" fill="none" stroke="#059669" stroke-width="2.5" /><circle cx="70.0" cy="259.7" r="3.5" fill="#059669"><title>rlsf-posix: 20,318.00</title></circle><circle cx="292.0" cy="175.4" r="3.5" fill="#059669"><title>rlsf-posix: 125,577.00</title></circle><circle cx="514.0" cy="229.4" r="3.5" fill="#059669"><title>rlsf-posix: 58,179.00</title></circle><circle cx="736.0" cy="95.9" r="3.5" fill="#059669"><title>rlsf-posix: 224,875.00</title></circle><polyline points="70.0,36.0 292.0,183.7 514.0,56.6 736.0,189.6" fill="none" stroke="#7c3aed" stroke-width="2.5" /><circle cx="70.0" cy="36.0" r="3.5" fill="#7c3aed"><title>mimalloc: 299,716.00</title></circle><circle cx="292.0" cy="183.7" r="3.5" fill="#7c3aed"><title>mimalloc: 115,278.00</title></circle><circle cx="514.0" cy="56.6" r="3.5" fill="#7c3aed"><title>mimalloc: 273,978.00</title></circle><circle cx="736.0" cy="189.6" r="3.5" fill="#7c3aed"><title>mimalloc: 107,914.00</title></circle>
+    <g><rect x="70" y="312" width="10" height="10" fill="#2563eb" /><text x="86" y="322" class="legend">wf_alloc</text></g><g><rect x="225" y="312" width="10" height="10" fill="#dc2626" /><text x="241" y="322" class="legend">rlsf</text></g><g><rect x="380" y="312" width="10" height="10" fill="#059669" /><text x="396" y="322" class="legend">rlsf-posix</text></g><g><rect x="535" y="312" width="10" height="10" fill="#7c3aed" /><text x="551" y="322" class="legend">mimalloc</text></g>
+  </svg>
+</section>
+</div>
+  <h2 style="margin: 24px 0 12px;">Results</h2>
+  <section class="panel"><table><thead><tr><th>requested_allocator</th><th>allocator</th><th>threads</th><th>live_slots_per_thread</th><th>returncode</th><th>throughput_ops_per_sec</th><th>throughput_allocs_per_sec</th><th>throughput_failed_allocs</th><th>alloc_latency_samples</th><th>alloc_latency_average_ns</th><th>alloc_latency_p50_ns</th><th>alloc_latency_p90_ns</th><th>alloc_latency_p99_ns</th><th>alloc_latency_worst_ns</th><th>free_latency_samples</th><th>free_latency_average_ns</th><th>free_latency_p50_ns</th><th>free_latency_p90_ns</th><th>free_latency_p99_ns</th><th>free_latency_worst_ns</th></tr></thead><tbody><tr><td class="">mimalloc</td><td class="">MiMalloc</td><td class="">1</td><td class="">4,096</td><td class="">0</td><td class="">25,112,973</td><td class="">12,556,487</td><td class="">0</td><td class="">23,950,525</td><td class="">45</td><td class="">40</td><td class="">61</td><td class="">111</td><td class="">316,618</td><td class="">23,950,525</td><td class="">37</td><td class="">40</td><td class="">41</td><td class="">51</td><td class="">299,716</td></tr><tr><td class="">rlsf</td><td class="">RlsfAwkernelSpin</td><td class="">1</td><td class="">4,096</td><td class="">0</td><td class="">18,357,294</td><td class="">9,178,647</td><td class="">0</td><td class="">22,118,752</td><td class="">47</td><td class="">41</td><td class="">60</td><td class="">80</td><td class="">19,026</td><td class="">22,118,752</td><td class="">52</td><td class="">50</td><td class="">70</td><td class="">91</td><td class="">19,366</td></tr><tr><td class="">rlsf-posix</td><td class="">RlsfPosixMutex</td><td class="">1</td><td class="">4,096</td><td class="">0</td><td class="">17,428,662</td><td class="">8,714,331</td><td class="">0</td><td class="">20,153,771</td><td class="">59</td><td class="">50</td><td class="">80</td><td class="">160</td><td class="">20,308</td><td class="">20,153,771</td><td class="">61</td><td class="">60</td><td class="">80</td><td class="">110</td><td class="">20,318</td></tr><tr><td class="">wf_alloc</td><td class="">WfAlloc</td><td class="">1</td><td class="">4,096</td><td class="">0</td><td class="">22,176,066</td><td class="">11,088,033</td><td class="">0</td><td class="">23,298,257</td><td class="">47</td><td class="">40</td><td class="">60</td><td class="">100</td><td class="">19,347</td><td class="">23,298,257</td><td class="">41</td><td class="">40</td><td class="">50</td><td class="">61</td><td class="">43,372</td></tr><tr><td class="">mimalloc</td><td class="">MiMalloc</td><td class="">2</td><td class="">2,048</td><td class="">0</td><td class="">23,671,189</td><td class="">11,835,594</td><td class="">0</td><td class="">36,447,594</td><td class="">54</td><td class="">40</td><td class="">80</td><td class="">180</td><td class="">28,113</td><td class="">36,447,594</td><td class="">50</td><td class="">40</td><td class="">80</td><td class="">111</td><td class="">115,278</td></tr><tr><td class="">rlsf</td><td class="">RlsfAwkernelSpin</td><td class="">2</td><td class="">2,048</td><td class="">0</td><td class="">7,217,385</td><td class="">3,608,692</td><td class="">0</td><td class="">17,305,715</td><td class="">189</td><td class="">190</td><td class="">280</td><td class="">351</td><td class="">19,206</td><td class="">17,305,715</td><td class="">183</td><td class="">180</td><td class="">261</td><td class="">331</td><td class="">19,888</td></tr><tr><td class="">rlsf-posix</td><td class="">RlsfPosixMutex</td><td class="">2</td><td class="">2,048</td><td class="">0</td><td class="">4,393,099</td><td class="">2,196,549</td><td class="">0</td><td class="">10,254,801</td><td class="">402</td><td class="">191</td><td class="">842</td><td class="">1,343</td><td class="">112,312</td><td class="">10,254,801</td><td class="">403</td><td class="">181</td><td class="">821</td><td class="">1,302</td><td class="">125,577</td></tr><tr><td class="">wf_alloc</td><td class="">WfAlloc</td><td class="">2</td><td class="">2,048</td><td class="">0</td><td class="">21,943,104</td><td class="">10,971,552</td><td class="">0</td><td class="">34,825,001</td><td class="">56</td><td class="">40</td><td class="">80</td><td class="">201</td><td class="">51,608</td><td class="">34,825,001</td><td class="">53</td><td class="">40</td><td class="">80</td><td class="">120</td><td class="">20,208</td></tr><tr><td class="">mimalloc</td><td class="">MiMalloc</td><td class="">4</td><td class="">1,024</td><td class="">0</td><td class="">34,453,994</td><td class="">17,226,997</td><td class="">0</td><td class="">67,253,997</td><td class="">54</td><td class="">40</td><td class="">80</td><td class="">190</td><td class="">429,782</td><td class="">67,253,997</td><td class="">50</td><td class="">40</td><td class="">80</td><td class="">111</td><td class="">273,978</td></tr><tr><td class="">rlsf</td><td class="">RlsfAwkernelSpin</td><td class="">4</td><td class="">1,024</td><td class="">0</td><td class="">4,819,310</td><td class="">2,409,655</td><td class="">0</td><td class="">12,444,144</td><td class="">704</td><td class="">511</td><td class="">1,383</td><td class="">3,076</td><td class="">68,440</td><td class="">12,444,144</td><td class="">703</td><td class="">511</td><td class="">1,393</td><td class="">2,956</td><td class="">38,563</td></tr><tr><td class="">rlsf-posix</td><td class="">RlsfPosixMutex</td><td class="">4</td><td class="">1,024</td><td class="">0</td><td class="">4,594,485</td><td class="">2,297,242</td><td class="">0</td><td class="">9,956,466</td><td class="">945</td><td class="">541</td><td class="">2,294</td><td class="">7,063</td><td class="">59,592</td><td class="">9,956,466</td><td class="">893</td><td class="">471</td><td class="">2,185</td><td class="">6,973</td><td class="">58,179</td></tr><tr><td class="">wf_alloc</td><td class="">WfAlloc</td><td class="">4</td><td class="">1,024</td><td class="">0</td><td class="">35,856,112</td><td class="">17,928,056</td><td class="">0</td><td class="">66,642,779</td><td class="">49</td><td class="">40</td><td class="">60</td><td class="">140</td><td class="">61,196</td><td class="">66,642,779</td><td class="">49</td><td class="">40</td><td class="">70</td><td class="">110</td><td class="">17,182</td></tr><tr><td class="">mimalloc</td><td class="">MiMalloc</td><td class="">8</td><td class="">512</td><td class="">0</td><td class="">41,454,140</td><td class="">20,727,070</td><td class="">0</td><td class="">99,148,040</td><td class="">55</td><td class="">40</td><td class="">80</td><td class="">200</td><td class="">1,115,558</td><td class="">99,148,040</td><td class="">51</td><td class="">40</td><td class="">81</td><td class="">120</td><td class="">107,914</td></tr><tr><td class="">rlsf</td><td class="">RlsfAwkernelSpin</td><td class="">8</td><td class="">512</td><td class="">0</td><td class="">2,847,153</td><td class="">1,423,577</td><td class="">0</td><td class="">7,245,887</td><td class="">2,142</td><td class="">1,212</td><td class="">4,669</td><td class="">15,059</td><td class="">138,952</td><td class="">7,245,887</td><td class="">3,113</td><td class="">1,342</td><td class="">6,583</td><td class="">31,219</td><td class="">209,817</td></tr><tr><td class="">rlsf-posix</td><td class="">RlsfPosixMutex</td><td class="">8</td><td class="">512</td><td class="">0</td><td class="">3,475,061</td><td class="">1,737,531</td><td class="">0</td><td class="">8,552,217</td><td class="">2,301</td><td class="">1,323</td><td class="">6,162</td><td class="">13,055</td><td class="">142,189</td><td class="">8,552,217</td><td class="">2,187</td><td class="">1,193</td><td class="">6,051</td><td class="">12,944</td><td class="">224,875</td></tr><tr><td class="">wf_alloc</td><td class="">WfAlloc</td><td class="">8</td><td class="">512</td><td class="">0</td><td class="">42,634,051</td><td class="">21,317,025</td><td class="">0</td><td class="">98,524,640</td><td class="">50</td><td class="">40</td><td class="">70</td><td class="">140</td><td class="">61,586</td><td class="">98,524,640</td><td class="">51</td><td class="">40</td><td class="">80</td><td class="">130</td><td class="">21,481</td></tr></tbody></table></section>
+  <h2 style="margin: 24px 0 12px;">Raw Output</h2>
+  <details><summary>wf_alloc threads=1 rc=0</summary><pre>$ target/release/memalloc_bench --allocator wf_alloc --threads 1 --duration-ms 5000 --pool-mib 1024 --live-slots 4096 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: WfAlloc
+threads: 1
+core_pinning: base_core=0 core_stride=2 cores=1
+realtime_priority: Some(80)
+throughput_duration_sec: 5.000
+throughput_allocs: 55444078
+throughput_frees: 55444078
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 45437013569
+throughput_ops_per_sec: 22176066
+throughput_allocs_per_sec: 11088033
+latency_duration_sec: 5.246
+alloc_latency_samples: 23298257
+alloc_latency_average_ns: 47
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 60
+alloc_latency_p99_ns: 100
+alloc_latency_worst_ns: 19347
+free_latency_samples: 23298257
+free_latency_average_ns: 41
+free_latency_p50_ns: 40
+free_latency_p90_ns: 50
+free_latency_p99_ns: 61
+free_latency_worst_ns: 43372
+</pre></details>
+<details><summary>rlsf threads=1 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf --threads 1 --duration-ms 5000 --pool-mib 1024 --live-slots 4096 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfAwkernelSpin
+threads: 1
+core_pinning: base_core=0 core_stride=2 cores=1
+realtime_priority: Some(80)
+throughput_duration_sec: 5.000
+throughput_allocs: 45896074
+throughput_frees: 45896074
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 37622290954
+throughput_ops_per_sec: 18357294
+throughput_allocs_per_sec: 9178647
+latency_duration_sec: 5.230
+alloc_latency_samples: 22118752
+alloc_latency_average_ns: 47
+alloc_latency_p50_ns: 41
+alloc_latency_p90_ns: 60
+alloc_latency_p99_ns: 80
+alloc_latency_worst_ns: 19026
+free_latency_samples: 22118752
+free_latency_average_ns: 52
+free_latency_p50_ns: 50
+free_latency_p90_ns: 70
+free_latency_p99_ns: 91
+free_latency_worst_ns: 19366
+</pre></details>
+<details><summary>rlsf-posix threads=1 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf-posix --threads 1 --duration-ms 5000 --pool-mib 1024 --live-slots 4096 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfPosixMutex
+threads: 1
+core_pinning: base_core=0 core_stride=2 cores=1
+realtime_priority: Some(80)
+throughput_duration_sec: 5.000
+throughput_allocs: 43574479
+throughput_frees: 43574479
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 35721289957
+throughput_ops_per_sec: 17428662
+throughput_allocs_per_sec: 8714331
+latency_duration_sec: 5.222
+alloc_latency_samples: 20153771
+alloc_latency_average_ns: 59
+alloc_latency_p50_ns: 50
+alloc_latency_p90_ns: 80
+alloc_latency_p99_ns: 160
+alloc_latency_worst_ns: 20308
+free_latency_samples: 20153771
+free_latency_average_ns: 61
+free_latency_p50_ns: 60
+free_latency_p90_ns: 80
+free_latency_p99_ns: 110
+free_latency_worst_ns: 20318
+</pre></details>
+<details><summary>mimalloc threads=1 rc=0</summary><pre>$ target/release/memalloc_bench --allocator mimalloc --threads 1 --duration-ms 5000 --pool-mib 1024 --live-slots 4096 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: MiMalloc
+threads: 1
+core_pinning: base_core=0 core_stride=2 cores=1
+realtime_priority: Some(80)
+throughput_duration_sec: 5.000
+throughput_allocs: 62785567
+throughput_frees: 62785567
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 51446113786
+throughput_ops_per_sec: 25112973
+throughput_allocs_per_sec: 12556487
+latency_duration_sec: 5.275
+alloc_latency_samples: 23950525
+alloc_latency_average_ns: 45
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 61
+alloc_latency_p99_ns: 111
+alloc_latency_worst_ns: 316618
+free_latency_samples: 23950525
+free_latency_average_ns: 37
+free_latency_p50_ns: 40
+free_latency_p90_ns: 41
+free_latency_p99_ns: 51
+free_latency_worst_ns: 299716
+</pre></details>
+<details><summary>wf_alloc threads=2 rc=0</summary><pre>$ target/release/memalloc_bench --allocator wf_alloc --threads 2 --duration-ms 5000 --pool-mib 1024 --live-slots 2048 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: WfAlloc
+threads: 2
+core_pinning: base_core=0 core_stride=2 cores=2
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 54864594
+throughput_frees: 54864594
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 44953871526
+throughput_ops_per_sec: 21943104
+throughput_allocs_per_sec: 10971552
+latency_duration_sec: 5.376
+alloc_latency_samples: 34825001
+alloc_latency_average_ns: 56
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 80
+alloc_latency_p99_ns: 201
+alloc_latency_worst_ns: 51608
+free_latency_samples: 34825001
+free_latency_average_ns: 53
+free_latency_p50_ns: 40
+free_latency_p90_ns: 80
+free_latency_p99_ns: 120
+free_latency_worst_ns: 20208
+</pre></details>
+<details><summary>rlsf threads=2 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf --threads 2 --duration-ms 5000 --pool-mib 1024 --live-slots 2048 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfAwkernelSpin
+threads: 2
+core_pinning: base_core=0 core_stride=2 cores=2
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 18046132
+throughput_frees: 18046132
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 14798585712
+throughput_ops_per_sec: 7217385
+throughput_allocs_per_sec: 3608692
+latency_duration_sec: 5.186
+alloc_latency_samples: 17305715
+alloc_latency_average_ns: 189
+alloc_latency_p50_ns: 190
+alloc_latency_p90_ns: 280
+alloc_latency_p99_ns: 351
+alloc_latency_worst_ns: 19206
+free_latency_samples: 17305715
+free_latency_average_ns: 183
+free_latency_p50_ns: 180
+free_latency_p90_ns: 261
+free_latency_p99_ns: 331
+free_latency_worst_ns: 19888
+</pre></details>
+<details><summary>rlsf-posix threads=2 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf-posix --threads 2 --duration-ms 5000 --pool-mib 1024 --live-slots 2048 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfPosixMutex
+threads: 2
+core_pinning: base_core=0 core_stride=2 cores=2
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 10984820
+throughput_frees: 10984820
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 9001821906
+throughput_ops_per_sec: 4393099
+throughput_allocs_per_sec: 2196549
+latency_duration_sec: 5.112
+alloc_latency_samples: 10254801
+alloc_latency_average_ns: 402
+alloc_latency_p50_ns: 191
+alloc_latency_p90_ns: 842
+alloc_latency_p99_ns: 1343
+alloc_latency_worst_ns: 112312
+free_latency_samples: 10254801
+free_latency_average_ns: 403
+free_latency_p50_ns: 181
+free_latency_p90_ns: 821
+free_latency_p99_ns: 1302
+free_latency_worst_ns: 125577
+</pre></details>
+<details><summary>mimalloc threads=2 rc=0</summary><pre>$ target/release/memalloc_bench --allocator mimalloc --threads 2 --duration-ms 5000 --pool-mib 1024 --live-slots 2048 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: MiMalloc
+threads: 2
+core_pinning: base_core=0 core_stride=2 cores=2
+realtime_priority: Some(80)
+throughput_duration_sec: 5.000
+throughput_allocs: 59181632
+throughput_frees: 59181632
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 48487691984
+throughput_ops_per_sec: 23671189
+throughput_allocs_per_sec: 11835594
+latency_duration_sec: 5.409
+alloc_latency_samples: 36447594
+alloc_latency_average_ns: 54
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 80
+alloc_latency_p99_ns: 180
+alloc_latency_worst_ns: 28113
+free_latency_samples: 36447594
+free_latency_average_ns: 50
+free_latency_p50_ns: 40
+free_latency_p90_ns: 80
+free_latency_p99_ns: 111
+free_latency_worst_ns: 115278
+</pre></details>
+<details><summary>wf_alloc threads=4 rc=0</summary><pre>$ target/release/memalloc_bench --allocator wf_alloc --threads 4 --duration-ms 5000 --pool-mib 1024 --live-slots 1024 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: WfAlloc
+threads: 4
+core_pinning: base_core=0 core_stride=2 cores=4
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 89649298
+throughput_frees: 89649298
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 73472954239
+throughput_ops_per_sec: 35856112
+throughput_allocs_per_sec: 17928056
+latency_duration_sec: 5.724
+alloc_latency_samples: 66642779
+alloc_latency_average_ns: 49
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 60
+alloc_latency_p99_ns: 140
+alloc_latency_worst_ns: 61196
+free_latency_samples: 66642779
+free_latency_average_ns: 49
+free_latency_p50_ns: 40
+free_latency_p90_ns: 70
+free_latency_p99_ns: 110
+free_latency_worst_ns: 17182
+</pre></details>
+<details><summary>rlsf threads=4 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf --threads 4 --duration-ms 5000 --pool-mib 1024 --live-slots 1024 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfAwkernelSpin
+threads: 4
+core_pinning: base_core=0 core_stride=2 cores=4
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 12049989
+throughput_frees: 12049989
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 9870695875
+throughput_ops_per_sec: 4819310
+throughput_allocs_per_sec: 2409655
+latency_duration_sec: 5.146
+alloc_latency_samples: 12444144
+alloc_latency_average_ns: 704
+alloc_latency_p50_ns: 511
+alloc_latency_p90_ns: 1383
+alloc_latency_p99_ns: 3076
+alloc_latency_worst_ns: 68440
+free_latency_samples: 12444144
+free_latency_average_ns: 703
+free_latency_p50_ns: 511
+free_latency_p90_ns: 1393
+free_latency_p99_ns: 2956
+free_latency_worst_ns: 38563
+</pre></details>
+<details><summary>rlsf-posix threads=4 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf-posix --threads 4 --duration-ms 5000 --pool-mib 1024 --live-slots 1024 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfPosixMutex
+threads: 4
+core_pinning: base_core=0 core_stride=2 cores=4
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 11488040
+throughput_frees: 11488040
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 9408978907
+throughput_ops_per_sec: 4594485
+throughput_allocs_per_sec: 2297242
+latency_duration_sec: 5.114
+alloc_latency_samples: 9956466
+alloc_latency_average_ns: 945
+alloc_latency_p50_ns: 541
+alloc_latency_p90_ns: 2294
+alloc_latency_p99_ns: 7063
+alloc_latency_worst_ns: 59592
+free_latency_samples: 9956466
+free_latency_average_ns: 893
+free_latency_p50_ns: 471
+free_latency_p90_ns: 2185
+free_latency_p99_ns: 6973
+free_latency_worst_ns: 58179
+</pre></details>
+<details><summary>mimalloc threads=4 rc=0</summary><pre>$ target/release/memalloc_bench --allocator mimalloc --threads 4 --duration-ms 5000 --pool-mib 1024 --live-slots 1024 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: MiMalloc
+threads: 4
+core_pinning: base_core=0 core_stride=2 cores=4
+realtime_priority: Some(80)
+throughput_duration_sec: 5.000
+throughput_allocs: 86142217
+throughput_frees: 86142217
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 70603524404
+throughput_ops_per_sec: 34453994
+throughput_allocs_per_sec: 17226997
+latency_duration_sec: 5.782
+alloc_latency_samples: 67253997
+alloc_latency_average_ns: 54
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 80
+alloc_latency_p99_ns: 190
+alloc_latency_worst_ns: 429782
+free_latency_samples: 67253997
+free_latency_average_ns: 50
+free_latency_p50_ns: 40
+free_latency_p90_ns: 80
+free_latency_p99_ns: 111
+free_latency_worst_ns: 273978
+</pre></details>
+<details><summary>wf_alloc threads=8 rc=0</summary><pre>$ target/release/memalloc_bench --allocator wf_alloc --threads 8 --duration-ms 5000 --pool-mib 1024 --live-slots 512 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: WfAlloc
+threads: 8
+core_pinning: base_core=0 core_stride=2 cores=8
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 106601989
+throughput_frees: 106601989
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 87396673687
+throughput_ops_per_sec: 42634051
+throughput_allocs_per_sec: 21317025
+latency_duration_sec: 6.093
+alloc_latency_samples: 98524640
+alloc_latency_average_ns: 50
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 70
+alloc_latency_p99_ns: 140
+alloc_latency_worst_ns: 61586
+free_latency_samples: 98524640
+free_latency_average_ns: 51
+free_latency_p50_ns: 40
+free_latency_p90_ns: 80
+free_latency_p99_ns: 130
+free_latency_worst_ns: 21481
+</pre></details>
+<details><summary>rlsf threads=8 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf --threads 8 --duration-ms 5000 --pool-mib 1024 --live-slots 512 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfAwkernelSpin
+threads: 8
+core_pinning: base_core=0 core_stride=2 cores=8
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 7119283
+throughput_frees: 7119283
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 5828624228
+throughput_ops_per_sec: 2847153
+throughput_allocs_per_sec: 1423577
+latency_duration_sec: 5.074
+alloc_latency_samples: 7245887
+alloc_latency_average_ns: 2142
+alloc_latency_p50_ns: 1212
+alloc_latency_p90_ns: 4669
+alloc_latency_p99_ns: 15059
+alloc_latency_worst_ns: 138952
+free_latency_samples: 7245887
+free_latency_average_ns: 3113
+free_latency_p50_ns: 1342
+free_latency_p90_ns: 6583
+free_latency_p99_ns: 31219
+free_latency_worst_ns: 209817
+</pre></details>
+<details><summary>rlsf-posix threads=8 rc=0</summary><pre>$ target/release/memalloc_bench --allocator rlsf-posix --threads 8 --duration-ms 5000 --pool-mib 1024 --live-slots 512 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: RlsfPosixMutex
+threads: 8
+core_pinning: base_core=0 core_stride=2 cores=8
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 8689695
+throughput_frees: 8689695
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 7119057694
+throughput_ops_per_sec: 3475061
+throughput_allocs_per_sec: 1737531
+latency_duration_sec: 5.092
+alloc_latency_samples: 8552217
+alloc_latency_average_ns: 2301
+alloc_latency_p50_ns: 1323
+alloc_latency_p90_ns: 6162
+alloc_latency_p99_ns: 13055
+alloc_latency_worst_ns: 142189
+free_latency_samples: 8552217
+free_latency_average_ns: 2187
+free_latency_p50_ns: 1193
+free_latency_p90_ns: 6051
+free_latency_p99_ns: 12944
+free_latency_worst_ns: 224875
+</pre></details>
+<details><summary>mimalloc threads=8 rc=0</summary><pre>$ target/release/memalloc_bench --allocator mimalloc --threads 8 --duration-ms 5000 --pool-mib 1024 --live-slots 512 --max-size 16384 --core-stride 2 --remote-free-percent 20
+
+allocator: MiMalloc
+threads: 8
+core_pinning: base_core=0 core_stride=2 cores=8
+realtime_priority: Some(80)
+throughput_duration_sec: 5.001
+throughput_allocs: 103661005
+throughput_frees: 103661005
+throughput_failed_allocs: 0
+throughput_bytes_allocated: 84985800350
+throughput_ops_per_sec: 41454140
+throughput_allocs_per_sec: 20727070
+latency_duration_sec: 6.138
+alloc_latency_samples: 99148040
+alloc_latency_average_ns: 55
+alloc_latency_p50_ns: 40
+alloc_latency_p90_ns: 80
+alloc_latency_p99_ns: 200
+alloc_latency_worst_ns: 1115558
+free_latency_samples: 99148040
+free_latency_average_ns: 51
+free_latency_p50_ns: 40
+free_latency_p90_ns: 81
+free_latency_p99_ns: 120
+free_latency_worst_ns: 107914
+</pre></details>
+</main>
+</body>
+</html>
